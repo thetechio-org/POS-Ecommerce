@@ -38,14 +38,9 @@ class DemoImages extends Command
         'Power Banks'       => 'mobile-accessories',
     ];
 
-    /** Background pairs for the drawn cards, keyed loosely by feel. */
-    private const PALETTES = [
-        ['#0f2c24', '#1b4d3e', '#c9a227'],
-        ['#12233a', '#1d3a5f', '#7fb2e5'],
-        ['#2a1a2e', '#452a4d', '#d9a5e0'],
-        ['#2b2118', '#4a3826', '#e0b56a'],
-        ['#1a2b2b', '#2c4a4a', '#8fd4cf'],
-        ['#261c1c', '#452e2e', '#e09a9a'],
+    /** Accent colours for the drawn cards — one per category, on white. */
+    private const ACCENTS = [
+        '#0f5132', '#1d4e89', '#7d3c98', '#a8500f', '#0e7490', '#9d2f4f',
     ];
 
     private array $pool = [];
@@ -161,63 +156,51 @@ class DemoImages extends Command
     }
 
     /**
-     * Draw a typographic product card: brand line, wrapped product name, and a
-     * category label, over a soft diagonal gradient.
+     * Draw a typographic product card.
+     *
+     * The real product shots come on white, so these do too — a dark card sitting
+     * beside them in the grid reads as a broken image rather than a considered
+     * one. Only the accent colour changes between categories.
      */
     private function drawCard(string $name, string $brand, string $category, string $path): void
     {
         $size = 800;
         $img = imagecreatetruecolor($size, $size);
-        [$from, $to, $accentHex] = self::PALETTES[abs(crc32($category)) % count(self::PALETTES)];
 
-        $this->gradient($img, $size, $from, $to);
-
-        $white  = imagecolorallocate($img, 255, 255, 255);
+        $accentHex = self::ACCENTS[abs(crc32($category)) % count(self::ACCENTS)];
         $accent = $this->allocate($img, $accentHex);
-        $muted  = imagecolorallocatealpha($img, 255, 255, 255, 70);
+        $white  = imagecolorallocate($img, 255, 255, 255);
+        $ink    = imagecolorallocate($img, 26, 32, 38);
+        $muted  = imagecolorallocate($img, 140, 150, 158);
+        $hair   = imagecolorallocate($img, 232, 236, 239);
+
+        imagefilledrectangle($img, 0, 0, $size, $size, $white);
+
+        // A faint disc keeps the centre from reading as empty paper
+        imagefilledellipse($img, $size / 2, $size / 2 - 30, 470, 470, $hair);
 
         $bold    = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
         $regular = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
 
-        // A quiet ring behind the type, so the card is not a flat rectangle
-        imagesetthickness($img, 2);
-        imageellipse($img, $size / 2, $size / 2, 560, 560, $muted);
-        imageellipse($img, $size / 2, $size / 2, 620, 620, $muted);
+        // Accent rule + brand, top left
+        imagefilledrectangle($img, 70, 96, 118, 100, $accent);
+        imagettftext($img, 19, 0, 70, 84, $accent, $bold, mb_strtoupper($brand));
 
-        imagettftext($img, 20, 0, 70, 120, $accent, $bold, mb_strtoupper($brand));
-
-        $lines = $this->wrap($name, 16);
-        $y = ($size / 2) - (count($lines) - 1) * 34 - 10;
+        $lines = $this->wrap($name, 15);
+        $y = ($size / 2) - (count($lines) - 1) * 32;
         foreach ($lines as $line) {
-            imagettftext($img, 38, 0, 70, $y, $white, $bold, $line);
-            $y += 68;
+            imagettftext($img, 36, 0, 70, $y, $ink, $bold, $line);
+            $y += 64;
         }
 
-        imagettftext($img, 17, 0, 70, $size - 80, $muted, $regular, $category);
+        imagettftext($img, 17, 0, 70, $size - 82, $muted, $regular, $category);
 
         ob_start();
-        imagewebp($img, null, 88);
+        imagewebp($img, null, 90);
         $binary = ob_get_clean();
         imagedestroy($img);
 
         Storage::disk('public')->put($path, $binary);
-    }
-
-    private function gradient($img, int $size, string $from, string $to): void
-    {
-        [$r1, $g1, $b1] = $this->rgb($from);
-        [$r2, $g2, $b2] = $this->rgb($to);
-
-        for ($i = 0; $i < $size; $i++) {
-            $t = $i / $size;
-            $colour = imagecolorallocate(
-                $img,
-                (int) ($r1 + ($r2 - $r1) * $t),
-                (int) ($g1 + ($g2 - $g1) * $t),
-                (int) ($b1 + ($b2 - $b1) * $t)
-            );
-            imageline($img, 0, $i, $size, $i, $colour);
-        }
     }
 
     private function allocate($img, string $hex): int
