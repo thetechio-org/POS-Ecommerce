@@ -76,6 +76,11 @@ class Product extends Model
         return $this->belongsToMany(Supplier::class, 'product_supplier');
     }
 
+    public function saleItems()
+    {
+        return $this->hasMany(SaleItem::class);
+    }
+
 
     public function getDiscountedPriceAttribute()
     {

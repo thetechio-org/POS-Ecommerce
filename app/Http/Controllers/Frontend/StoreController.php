@@ -76,7 +76,65 @@ class StoreController extends Controller
                 return $product;
             });
 
-        return view('store.landing', compact('categories', 'products'));
+        // Extra collections the landing page composes its sections from.
+        $decorate = fn ($collection) => $collection->map(fn ($p) => $this->decorate($p, $discountRules));
+
+        $bestSellers = $decorate(
+            Product::with(['inventoryStocks', 'baseUnit', 'category'])
+                ->withSum('saleItems as sold_qty', 'quantity')
+                ->orderByDesc('sold_qty')
+                ->take(8)
+                ->get()
+        );
+
+        // One representative image per browsable category, for the category tiles.
+        $showcaseCategories = Category::whereNotNull('parent_id')
+            ->withCount('products')
+            ->having('products_count', '>', 0)
+            ->take(8)
+            ->get()
+            ->map(function ($category) {
+                $category->cover = Product::where('category_id', $category->id)
+                    ->whereNotNull('product_img')->value('product_img');
+
+                return $category;
+            });
+
+        $brands = Product::whereNotNull('brand')
+            ->distinct()->orderBy('brand')->pluck('brand')->take(10);
+
+        return view('store.landing', compact(
+            'categories', 'products', 'bestSellers', 'showcaseCategories', 'brands'
+        ));
+    }
+
+    /**
+     * Attach the stock and discounted-price figures a product card needs.
+     * The listing queries all need the same treatment, so it lives in one place.
+     */
+    private function decorate(Product $product, $discountRules): Product
+    {
+        $conversionFactor = $product->baseUnit->conversion_factor ?? 1;
+        $baseQuantity = $product->inventoryStocks->sum('quantity_in_base_unit') ?? 0;
+        $product->stock_quantity = $conversionFactor > 0 ? $baseQuantity / $conversionFactor : $baseQuantity;
+        $product->in_stock = $product->stock_quantity > 0;
+
+        $product->final_price = $product->actual_price;
+        $product->has_discount = false;
+
+        $rule = $discountRules->first(function ($rule) use ($product) {
+            $targetIds = json_decode($rule->target_ids ?? '[]', true) ?: [];
+
+            return ($rule->type === 'product'  && in_array($product->id, $targetIds))
+                || ($rule->type === 'category' && in_array($product->category_id, $targetIds));
+        });
+
+        if ($rule) {
+            $product->final_price = round($product->actual_price - ($product->actual_price * $rule->discount / 100), 2);
+            $product->has_discount = true;
+        }
+
+        return $product;
     }
 
     public function shop(Request $request){

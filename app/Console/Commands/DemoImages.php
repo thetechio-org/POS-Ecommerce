@@ -11,18 +11,18 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Give every demo product a picture.
  *
- * Real product shots are used wherever a matching one can be fetched — phones get
- * phone photos, laptops get laptop photos. For the categories with no source of
- * real shots (televisions, cameras, speakers), a clean typographic card is drawn
- * instead. Both read as deliberate; a mismatched stock photo does not, which is
- * why keyword image services are not used here.
+ * Every product gets a drawn typographic card by default. Cards are consistent
+ * and never wrong; the free sources of real product shots only cover a few
+ * categories and are a generation or two out of date, so a phone photo ends up
+ * under the wrong model name — which an audience of phone buyers will notice.
  *
- *     php artisan demo:images
- *     php artisan demo:images --force    # redo products that already have one
+ *     php artisan demo:images --force
+ *     php artisan demo:images --force --photos   # opt back into real shots
  */
 class DemoImages extends Command
 {
-    protected $signature = 'demo:images {--force : Replace images that already exist}';
+    protected $signature = 'demo:images {--force : Replace images that already exist}
+                            {--photos : Pull real product shots where a matching one exists}';
 
     protected $description = 'Download or draw a product image for every demo product';
 
@@ -50,7 +50,9 @@ class DemoImages extends Command
         Storage::disk('public')->makeDirectory('products');
         Storage::disk('public')->makeDirectory('products/variants');
 
-        $this->fetchPool();
+        if ($this->option('photos')) {
+            $this->fetchPool();
+        }
 
         $products = Product::with('category')->get();
         $bar = $this->output->createProgressBar($products->count());
@@ -69,7 +71,7 @@ class DemoImages extends Command
             $path = "products/{$product->id}.webp";
             $category = $product->category->name ?? '';
 
-            if ($this->downloadFor($category, $path)) {
+            if ($this->option('photos') && $this->downloadFor($category, $path)) {
                 $downloaded++;
             } else {
                 $this->drawCard($product->name, $product->brand ?? 'Sellora', $category, $path);
