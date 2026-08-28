@@ -169,6 +169,74 @@
     </div>
 </section>
 
+{{-- ─── Deal of the week ─── --}}
+@if($dealProducts->count())
+<section class="pb-5">
+    <div class="container">
+        <div class="lx-deal">
+            <div class="row align-items-center g-4">
+                <div class="col-lg-4">
+                    <div class="lx-deal-eyebrow">Limited time</div>
+                    <h3 class="lx-deal-title">Deal of the Week</h3>
+                    <p class="lx-deal-text">
+                        Selected accessories and audio at a reduced price. Offer ends when the clock does.
+                    </p>
+                    <div class="lx-clock" id="lxClock" data-ends="{{ $dealEndsAt }}">
+                        <div><b id="cd-d">00</b><span>Days</span></div>
+                        <div><b id="cd-h">00</b><span>Hrs</span></div>
+                        <div><b id="cd-m">00</b><span>Min</span></div>
+                        <div><b id="cd-s">00</b><span>Sec</span></div>
+                    </div>
+                    <a href="{{ route('store.shop') }}" class="lx-cta mt-4">Shop the deal <i class="fas fa-arrow-right"></i></a>
+                </div>
+                <div class="col-lg-8">
+                    <div class="row g-3">
+                        @foreach($dealProducts as $product)
+                            <div class="col-6 col-md-4">
+                                @include('store.partials.product-card', ['product' => $product, 'cur' => $cur])
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+@endif
+
+{{-- ─── Testimonials ─── --}}
+<section class="pb-5">
+    <div class="container">
+        <div class="text-center mb-4">
+            <h2 class="lx-head">What Our <span>Customers Say</span></h2>
+            <p class="lx-sub mb-0">From shoppers across the Kingdom</p>
+        </div>
+        <div class="row g-3">
+            @foreach([
+                ['Abdulaziz Al-Otaibi', 'Riyadh',   'Ordered on Sunday, delivered to Olaya on Monday morning. The phone was sealed and genuine — exactly as listed.'],
+                ['Reem Al-Ghamdi',      'Jeddah',   'I compared prices across three stores. Sellora was the best, and the warranty was registered before I left the counter.'],
+                ['Sultan Al-Dosari',    'Al Khobar','Bought a laptop for the office. Invoice with VAT arrived by email straight away, which made expensing it painless.'],
+            ] as $t)
+            <div class="col-md-4">
+                <div class="lx-quote">
+                    <div class="lx-stars mb-2">
+                        @for($i = 0; $i < 5; $i++)<i class="fas fa-star"></i>@endfor
+                    </div>
+                    <p>{{ $t[2] }}</p>
+                    <div class="lx-quote-by">
+                        <span class="lx-avatar">{{ substr($t[0], 0, 1) }}</span>
+                        <div>
+                            <b>{{ $t[0] }}</b>
+                            <small>{{ $t[1] }}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            @endforeach
+        </div>
+    </div>
+</section>
+
 {{-- ─── Trust row ─── --}}
 <section class="pb-5">
     <div class="container">
@@ -196,6 +264,26 @@
 
 @section('frontend_js')
 <script>
+    // Deal countdown
+    document.addEventListener('DOMContentLoaded', function () {
+        const clock = document.getElementById('lxClock');
+        if (clock) {
+            const ends = new Date(clock.dataset.ends).getTime();
+            const pad = n => String(Math.max(0, n)).padStart(2, '0');
+
+            const tick = () => {
+                const left = ends - Date.now();
+                if (left <= 0) { return; }
+                document.getElementById('cd-d').textContent = pad(Math.floor(left / 86400000));
+                document.getElementById('cd-h').textContent = pad(Math.floor(left / 3600000) % 24);
+                document.getElementById('cd-m').textContent = pad(Math.floor(left / 60000) % 60);
+                document.getElementById('cd-s').textContent = pad(Math.floor(left / 1000) % 60);
+            };
+            tick();
+            setInterval(tick, 1000);
+        }
+    });
+
     // New-arrivals category filter
     document.addEventListener('DOMContentLoaded', function () {
         const tabs  = document.querySelectorAll('#lxTabs .lx-tab');

@@ -101,10 +101,70 @@
                     </a>
                     @endforeach
                 </div>
+
+                <div class="sidebar-box mt-3">
+                    <div class="sidebar-label">Brand</div>
+                    <a href="{{ route('store.shop', array_merge(request()->except(['brand','page']))) }}"
+                       class="cat-link {{ !request('brand') ? 'active' : '' }}">
+                        <span>All brands</span>
+                    </a>
+                    @foreach($shopBrands as $b)
+                        <a href="{{ route('store.shop', array_merge(request()->except('page'), ['brand' => $b])) }}"
+                           class="cat-link {{ request('brand') === $b ? 'active' : '' }}">
+                            <span>{{ $b }}</span>
+                        </a>
+                    @endforeach
+                </div>
+
+                <div class="sidebar-box mt-3">
+                    <div class="sidebar-label">Price ({{ $setting->currency_symbol ?? 'SAR' }})</div>
+                    <form method="GET" action="{{ route('store.shop') }}">
+                        @foreach(request()->except(['min','max','page']) as $k => $v)
+                            <input type="hidden" name="{{ $k }}" value="{{ $v }}">
+                        @endforeach
+                        <div class="d-flex gap-2 align-items-center mb-2">
+                            <input type="number" name="min" value="{{ request('min') }}" placeholder="0"
+                                   class="form-control form-control-sm" min="0" max="{{ $priceCeiling }}">
+                            <span style="color:#94a3b8;">–</span>
+                            <input type="number" name="max" value="{{ request('max') }}" placeholder="{{ $priceCeiling }}"
+                                   class="form-control form-control-sm" min="0" max="{{ $priceCeiling }}">
+                        </div>
+                        <button class="btn-prim w-100 justify-content-center" style="padding:8px; font-size:.8rem;">
+                            Apply
+                        </button>
+                        @if(request('min') || request('max'))
+                            <a href="{{ route('store.shop', request()->except(['min','max','page'])) }}"
+                               class="d-block text-center mt-2" style="font-size:.76rem; color:#94a3b8;">Clear</a>
+                        @endif
+                    </form>
+                </div>
             </div>
 
             {{-- Products --}}
             <div class="col-lg-9">
+                {{-- Result count + sort --}}
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+                    <p class="mb-0" style="font-size:.85rem; color:#64748b;">
+                        Showing <b style="color:#0f172a;">{{ $products->firstItem() ?? 0 }}–{{ $products->lastItem() ?? 0 }}</b>
+                        of <b style="color:#0f172a;">{{ $products->total() }}</b> products
+                        @if(request('q')) for “{{ request('q') }}” @endif
+                    </p>
+
+                    <form method="GET" action="{{ route('store.shop') }}" class="d-flex align-items-center gap-2">
+                        @foreach(request()->except(['sort','page']) as $k => $v)
+                            <input type="hidden" name="{{ $k }}" value="{{ $v }}">
+                        @endforeach
+                        <label style="font-size:.82rem; color:#64748b;">Sort</label>
+                        <select name="sort" class="form-select form-select-sm" style="width:auto;"
+                                onchange="this.form.submit()">
+                            <option value="latest"     @selected(request('sort','latest')==='latest')>Newest first</option>
+                            <option value="price_asc"  @selected(request('sort')==='price_asc')>Price: low to high</option>
+                            <option value="price_desc" @selected(request('sort')==='price_desc')>Price: high to low</option>
+                            <option value="name"       @selected(request('sort')==='name')>Name A–Z</option>
+                        </select>
+                    </form>
+                </div>
+
                 @if($products->isEmpty())
                     <div class="text-center py-5">
                         <i class="fas fa-search fa-3x mb-3 d-block" style="color:#cbd5e1;"></i>

@@ -8,11 +8,23 @@
 @php
     $badge = $badge ?? null;
     $price = $product->has_discount ? $product->final_price : ($product->actual_price ?? 0);
+
+    // Demo ratings. Derived from the id so a product always shows the same score
+    // rather than a new one on every render — these are not real reviews.
+    $rating = 3.6 + (($product->id * 7) % 15) / 10;
+    $rating = min(5.0, round($rating * 2) / 2);
+    $reviews = 8 + (($product->id * 13) % 180);
+
+    $off = ($product->has_discount && $product->actual_price > 0)
+        ? round((($product->actual_price - $product->final_price) / $product->actual_price) * 100)
+        : null;
 @endphp
 
 <div class="lx-p">
     <div class="lx-p-img">
-        @if($badge)
+        @if($off)
+            <span class="lx-badge b-sale">-{{ $off }}%</span>
+        @elseif($badge)
             <span class="lx-badge {{ $badge[0] }}">{{ $badge[1] }}</span>
         @endif
 
@@ -34,11 +46,24 @@
     </div>
 
     <div class="lx-p-body">
-        <span class="lx-p-cat">{{ $product->category->name ?? 'General' }}</span>
+        <span class="lx-p-cat">{{ $product->brand ?? ($product->category->name ?? 'General') }}</span>
 
         <p class="lx-p-name">
             <a href="{{ route('store.product', $product->id) }}">{{ Str::limit($product->name, 42) }}</a>
         </p>
+
+        <div class="lx-stars mb-2">
+            @for($i = 1; $i <= 5; $i++)
+                @if($rating >= $i)
+                    <i class="fas fa-star"></i>
+                @elseif($rating >= $i - 0.5)
+                    <i class="fas fa-star-half-stroke"></i>
+                @else
+                    <i class="far fa-star"></i>
+                @endif
+            @endfor
+            <span>({{ $reviews }})</span>
+        </div>
 
         <div class="mt-auto">
             <div class="mb-3">

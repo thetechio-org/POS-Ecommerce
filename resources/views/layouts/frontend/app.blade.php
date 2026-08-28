@@ -282,6 +282,14 @@
         .footer-copyright p { color: #475569; font-size: .78rem; margin: 0; }
         .footer-divider { border-color: rgba(255,255,255,.06); margin: 2rem 0 1.5rem; }
 
+        .footer-pay { display:flex; align-items:center; gap:11px; }
+        .footer-pay span {
+            display:inline-flex; align-items:center; justify-content:center;
+            height:30px; min-width:44px; padding:0 8px;
+            background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.10);
+            border-radius:6px; color:#cbd5e1; font-size:1.05rem;
+        }
+
         /* ── Back to top ── */
         .back-to-top { background: var(--clr-primary) !important; border-color: var(--clr-primary) !important; }
 
@@ -324,6 +332,27 @@
         .hero-stat-val { font-size: 1.4rem; font-weight: 800; color: #fff; }
         .hero-stat-lbl { font-size: .73rem; color: #64748b; }
         .hero-divider { border-left: 1px solid rgba(255,255,255,.1); padding-left: 1.25rem; margin-left: .5rem; }
+
+        /* ── Nav search ── */
+        .nav-search {
+            display:flex; align-items:center; gap:8px;
+            background: var(--clr-light); border:1px solid var(--clr-border);
+            border-radius:10px; padding:0 6px 0 13px; max-width:430px; flex:1;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+        .nav-search:focus-within { border-color: var(--clr-primary); box-shadow:0 0 0 3px rgba(37,99,235,.10); }
+        .nav-search i { color:#94a3b8; font-size:.82rem; }
+        .nav-search input {
+            border:0; background:transparent; outline:none;
+            font-size:.85rem; padding:9px 0; flex:1; color:var(--clr-slate); min-width:0;
+        }
+        .nav-search button {
+            border:0; background: var(--clr-primary); color:#fff;
+            font-size:.78rem; font-weight:600; padding:7px 15px;
+            border-radius:8px; margin:4px 0; white-space:nowrap;
+        }
+        .nav-search button:hover { filter: brightness(1.08); }
+        @media (max-width: 1199px) { .nav-search { max-width:none; margin:12px 0; } }
 
         /* ── Storefront components (cards, sections, hero, promo) ── */
     /* ── Hero ──────────────────────────────────────────────────────────── */
@@ -446,6 +475,8 @@
     .lx-p-name { font-size:.88rem; font-weight:600; color:#0f172a; line-height:1.4; margin:5px 0 9px; }
     .lx-p-name a { color:inherit; text-decoration:none; }
     .lx-p-name a:hover { color:var(--clr-primary); }
+    .lx-stars { font-size:.7rem; color:#f59e0b; letter-spacing:.5px; }
+    .lx-stars span { color:#94a3b8; font-size:.7rem; margin-left:4px; letter-spacing:0; }
     .lx-price  { font-size:1rem; font-weight:800; color:#0f172a; }
     .lx-price-was { font-size:.8rem; color:#94a3b8; text-decoration:line-through; margin-left:6px; }
     .lx-oos {
@@ -491,6 +522,41 @@
     }
     .lx-tab:hover { border-color:#cbd5e1; }
     .lx-tab.active { background:#0f172a; color:#fff; border-color:#0f172a; }
+
+    /* ── Deal of the week ── */
+    .lx-deal {
+        border-radius:18px; padding:38px;
+        background: linear-gradient(135deg, #f8fafc 0%, #eef4fb 100%);
+        border:1px solid var(--clr-border);
+    }
+    .lx-deal-eyebrow { font-size:.7rem; font-weight:800; letter-spacing:1.3px; text-transform:uppercase; color:#dc2626; }
+    .lx-deal-title { font-size:1.75rem; font-weight:800; color:#0f172a; letter-spacing:-.7px; margin:8px 0 10px; }
+    .lx-deal-text { font-size:.87rem; color:#64748b; max-width:330px; margin-bottom:20px; }
+    .lx-clock { display:flex; gap:10px; }
+    .lx-clock div {
+        background:#0f172a; color:#fff; border-radius:10px;
+        padding:11px 0; min-width:62px; text-align:center;
+    }
+    .lx-clock b { display:block; font-size:1.3rem; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
+    .lx-clock span { font-size:.62rem; text-transform:uppercase; letter-spacing:.8px; opacity:.62; }
+
+    /* ── Testimonials ── */
+    .lx-quote {
+        background:#fff; border:1px solid var(--clr-border); border-radius:14px;
+        padding:24px; height:100%;
+    }
+    .lx-quote p { font-size:.87rem; color:#475569; line-height:1.65; margin-bottom:18px; }
+    .lx-quote-by { display:flex; align-items:center; gap:11px; }
+    .lx-quote-by b { display:block; font-size:.83rem; color:#0f172a; }
+    .lx-quote-by small { font-size:.74rem; color:#94a3b8; }
+    .lx-avatar {
+        width:38px; height:38px; border-radius:50%;
+        background: var(--clr-primary); color:#fff;
+        display:flex; align-items:center; justify-content:center;
+        font-weight:800; font-size:.9rem; flex-shrink:0;
+    }
+
+    @media (max-width: 991px) { .lx-deal { padding:26px; } }
 
     /* ── Trust row ─────────────────────────────────────────────────────── */
     .lx-trust {
@@ -555,7 +621,7 @@
                 <i class="fas fa-bars" style="color: var(--clr-slate);"></i>
             </button>
             <div class="collapse navbar-collapse" id="navMain">
-                <ul class="navbar-nav me-auto gap-1">
+                <ul class="navbar-nav gap-1 me-3">
                     <li class="nav-item">
                         <a href="{{ route('store.landing') }}"
                            class="nav-pill-link {{ Route::is('store.landing') ? 'active' : '' }}">
@@ -568,7 +634,36 @@
                             Shop
                         </a>
                     </li>
+                    @php
+                        $navCategories = \App\Models\Category::whereNotNull('parent_id')
+                            ->withCount('products')->having('products_count', '>', 0)->take(8)->get();
+                    @endphp
+                    @if($navCategories->count())
+                    <li class="nav-item dropdown">
+                        <a href="#" class="nav-pill-link dropdown-toggle" data-bs-toggle="dropdown">Categories</a>
+                        <ul class="dropdown-menu" style="min-width:230px;">
+                            @foreach($navCategories as $navCat)
+                                <li>
+                                    <a class="dropdown-item d-flex justify-content-between align-items-center"
+                                       href="{{ route('store.shop', ['category' => $navCat->id]) }}"
+                                       style="padding:.5rem .85rem; border-radius:8px; font-size:.85rem;">
+                                        {{ $navCat->name }}
+                                        <span style="font-size:.7rem; color:var(--clr-muted);">{{ $navCat->products_count }}</span>
+                                    </a>
+                                </li>
+                            @endforeach
+                        </ul>
+                    </li>
+                    @endif
                 </ul>
+
+                {{-- Search — the shop route already understands ?q= --}}
+                <form action="{{ route('store.shop') }}" method="GET" class="nav-search me-auto">
+                    <i class="fas fa-magnifying-glass"></i>
+                    <input type="search" name="q" value="{{ request('q') }}"
+                           placeholder="Search for phones, laptops, audio…" autocomplete="off">
+                    <button type="submit">Search</button>
+                </form>
                 <div class="d-flex align-items-center gap-2 ms-auto">
                     @php
                         $cartItems = session('cart');
@@ -728,9 +823,18 @@
 
             <hr class="footer-divider">
 
-            <div class="footer-copyright d-flex justify-content-between align-items-center flex-wrap gap-2 pb-4">
-                <p>&copy; {{ date('Y') }} {{ $setting->business_name ?? 'Store' }}. All rights reserved.</p>
-                <p>Developed by <a href="#" style="color:#64748b; text-decoration:none; font-weight:500;">{{ $setting->developed_by ?? '' }}</a></p>
+            <div class="footer-copyright d-flex justify-content-between align-items-center flex-wrap gap-3 pb-4">
+                <p class="mb-0">&copy; {{ date('Y') }} {{ $setting->business_name ?? 'Store' }}. All rights reserved.</p>
+
+                <div class="footer-pay">
+                    <span title="Visa"><i class="fab fa-cc-visa"></i></span>
+                    <span title="Mastercard"><i class="fab fa-cc-mastercard"></i></span>
+                    <span title="mada"><i class="fas fa-credit-card"></i></span>
+                    <span title="Apple Pay"><i class="fab fa-apple-pay"></i></span>
+                    <span title="Cash on delivery"><i class="fas fa-money-bill-wave"></i></span>
+                </div>
+
+                <p class="mb-0">Developed by <a href="#" style="color:#64748b; text-decoration:none; font-weight:500;">{{ $setting->developed_by ?? '' }}</a></p>
             </div>
         </div>
     </footer>

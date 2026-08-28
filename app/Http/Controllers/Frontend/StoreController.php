@@ -103,8 +103,19 @@ class StoreController extends Controller
         $brands = Product::whereNotNull('brand')
             ->distinct()->orderBy('brand')->pluck('brand')->take(10);
 
+        // Whatever an active discount rule currently touches, for the deal panel.
+        $dealProducts = $decorate(
+            Product::with(['inventoryStocks', 'baseUnit', 'category'])->take(24)->get()
+        )->filter->has_discount->take(6)->values();
+
+        // The clock runs to the end of the soonest-expiring rule.
+        $dealEndsAt = optional($discountRules->sortBy('end_date')->first())->end_date
+            ?? now()->addDays(7)->toDateString();
+        $dealEndsAt = \Carbon\Carbon::parse($dealEndsAt)->endOfDay()->toIso8601String();
+
         return view('store.landing', compact(
-            'categories', 'products', 'bestSellers', 'showcaseCategories', 'brands'
+            'categories', 'products', 'bestSellers', 'showcaseCategories', 'brands',
+            'dealProducts', 'dealEndsAt'
         ));
     }
 
@@ -166,7 +177,29 @@ class StoreController extends Controller
             });
         }
 
+        // Brand and price filters
+        if ($brand = $request->query('brand')) {
+            $productsQuery->where('brand', $brand);
+        }
+        if (is_numeric($request->query('min'))) {
+            $productsQuery->where('actual_price', '>=', (float) $request->query('min'));
+        }
+        if (is_numeric($request->query('max'))) {
+            $productsQuery->where('actual_price', '<=', (float) $request->query('max'));
+        }
+
+        // Sort. The default stays "latest", which the query already applied.
+        match ($request->query('sort')) {
+            'price_asc'  => $productsQuery->reorder('actual_price', 'asc'),
+            'price_desc' => $productsQuery->reorder('actual_price', 'desc'),
+            'name'       => $productsQuery->reorder('name', 'asc'),
+            default      => null,
+        };
+
         $products = $productsQuery->paginate(12)->withQueryString();
+
+        $shopBrands = Product::whereNotNull('brand')->distinct()->orderBy('brand')->pluck('brand');
+        $priceCeiling = (int) ceil((Product::max('actual_price') ?? 1000) / 500) * 500;
 
         $categories = Category::withCount('products')
             ->whereNotNull('parent_id')
@@ -220,7 +253,7 @@ class StoreController extends Controller
             return $product;
         });
     
-        return view('store.shop', compact('products', 'categories', 'search', 'categoryId'));
+        return view('store.shop', compact('products', 'categories', 'search', 'categoryId', 'shopBrands', 'priceCeiling'));
     }
 
     // public function product($id)
