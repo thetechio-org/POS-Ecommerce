@@ -336,8 +336,13 @@ Route::middleware('auth', 'verified')->group(function () {
 
 
 // Store Frontend
+// The shop is the public face of the site, so it owns "/". Everything else stays
+// under /store/* — dropping the prefix entirely would collide with the admin
+// routes for /profile, /orders and the password-reset paths.
+Route::get('/', [StoreController::class, 'landing'])->name('store.landing');
+Route::redirect('/store', '/');
+
 Route::prefix('store')->group(function () {
-    Route::get('/', [StoreController::class, 'landing'])->name('store.landing');
     Route::get('/shop', [StoreController::class, 'shop'])->name('store.shop');
     Route::get('/product/{id}', [StoreController::class, 'product'])->name('store.product');
     Route::post('/cart/add', [CartController::class, 'add'])->name('cart.add');

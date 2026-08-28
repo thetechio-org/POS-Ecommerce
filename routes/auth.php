@@ -14,10 +14,11 @@ Route::middleware('guest')->group(function () {
     // No self-service registration: staff accounts are created by an Admin
     // through /user/create. See tests/Feature/Auth/RegistrationTest.php.
 
-    Route::get('/', [AuthenticatedSessionController::class, 'create'])
+    // The storefront owns "/", so staff sign in at /admin.
+    Route::get('/admin', [AuthenticatedSessionController::class, 'create'])
         ->name('login');
 
-    Route::post('/', [AuthenticatedSessionController::class, 'store']);
+    Route::post('/admin', [AuthenticatedSessionController::class, 'store']);
 
     Route::get('forgot-password', [PasswordResetLinkController::class, 'create'])
         ->name('password.request');

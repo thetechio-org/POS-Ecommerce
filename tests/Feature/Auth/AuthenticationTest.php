@@ -50,5 +50,6 @@ test('users can logout', function () {
     $response = $this->actingAs($user)->post(route('logout'));
 
     $this->assertGuest();
-    $response->assertRedirect('/');
+    // Staff return to the staff sign-in page, not to the shop that now owns "/".
+    $response->assertRedirect(route('login'));
 });
