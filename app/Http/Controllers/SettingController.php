@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Providers\MailConfigServiceProvider;
+use Illuminate\Support\Facades\Cache;
+
 use Illuminate\Http\Request;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Storage;
@@ -85,6 +88,10 @@ class SettingController extends Controller
         $setting = MailSetting::first() ?? new MailSetting();
         $setting->fill($validated);
         $setting->save();
+
+        // MailConfigServiceProvider caches this row, so the new settings only take
+        // effect once that cache is dropped.
+        Cache::forget(MailConfigServiceProvider::CACHE_KEY);
 
         return redirect()->back()->with('success', 'Mail settings updated successfully.');
     }

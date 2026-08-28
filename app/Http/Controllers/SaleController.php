@@ -238,6 +238,19 @@ class SaleController extends Controller
     }
 
     public function process(Request $request){
+        $request->validate([
+            'customer_id'    => ['required', 'exists:customers,id'],
+            'branch_id'      => ['required', 'exists:branches,id'],
+            'cart_data'      => ['required', 'string'],
+            'payment_method' => ['required', 'in:cash,card'],
+            'amount_paid'    => ['required', 'numeric', 'min:0'],
+            'discount_type'  => ['nullable', 'in:fixed,percentage'],
+            'discountRate'   => ['nullable', 'numeric', 'min:0'],
+            'taxrate'        => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'taxRate'        => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'shipping'       => ['nullable', 'numeric', 'min:0'],
+        ]);
+
         $year = date('Y');
 
         // Generate the next invoice number
@@ -265,29 +278,33 @@ class SaleController extends Controller
         try {
             $cart = json_decode($request->cart_data, true);
 
-            if (json_last_error() !== JSON_ERROR_NONE || !is_array($cart)) {
+            if (json_last_error() !== JSON_ERROR_NONE || !is_array($cart) || empty($cart)) {
                 throw new \Exception('Invalid cart data.');
             }
 
+            // Price every line from the database and derive the totals here.
+            // Neither screen has a price-override field, so the prices and totals
+            // in the posted form are only a mirror of what the server already
+            // knows — and the browser is free to rewrite them before posting.
+            $lines = $this->buildSaleLines($cart);
+            if (empty($lines)) {
+                throw new \Exception('No valid products in the cart.');
+            }
+
+            $totals = $this->computeSaleTotals($lines, $request);
+
             // PRE-FLIGHT STOCK CHECK — verify every item before any DB write (locked to prevent race conditions)
-            foreach ($cart as $item) {
-                $variantId = $item['type'] === 'variant' ? $item['id'] : null;
-                $productId = $variantId ? optional(ProductVariant::find($variantId))->product_id : ($item['id'] ?? null);
-                if (!$productId) continue;
-
-                $unit    = Unit::find($item['unit_id'] ?? null);
-                $baseQty = ($item['qty'] ?? 0) * ($unit->conversion_factor ?? 1);
-
-                $available = InventoryStock::where('product_id', $productId)
-                    ->where('variant_id', $variantId)
+            foreach ($lines as $line) {
+                $available = InventoryStock::where('product_id', $line['product_id'])
+                    ->where('variant_id', $line['variant_id'])
                     ->where('warehouse_id', $warehouse_id)
                     ->lockForUpdate()
                     ->value('quantity_in_base_unit') ?? 0;
 
-                if ($available < $baseQty) {
+                if ($available < $line['base_qty']) {
                     throw new \Exception(
-                        'Insufficient stock for "' . ($item['name'] ?? 'product') .
-                        '". Available: ' . (int)$available . ', Requested: ' . (int)$baseQty . '.'
+                        'Insufficient stock for "' . $line['name'] .
+                        '". Available: ' . (int)$available . ', Requested: ' . (int)$line['base_qty'] . '.'
                     );
                 }
             }
@@ -298,35 +315,28 @@ class SaleController extends Controller
                 'branch_id'       => $request->branch_id,
                 'invoice_number'  => $invoiceNo,
                 'sale_date'       => now(),
-                'total_amount'    => $request->subtotal,
-                'discount_amount' => $request->discount,
-                'discount_type'   => $request->input('discount_type', 'fixed'),
-                'tax_amount'      => $request->tax,
-                'tax_percentage'  => $request->taxRate,
-                'shipping'        => $request->shipping,
-                'final_amount'    => $request->total_payable,
-                'paid_amount'     => $request->amount_paid,
-                'due_amount'      => $request->balance_due,
+                'total_amount'    => $totals['subtotal'],
+                'discount_amount' => $totals['discount'],
+                'discount_type'   => $totals['discount_type'],
+                'tax_amount'      => $totals['tax'],
+                'tax_percentage'  => $totals['tax_rate'],
+                'shipping'        => $totals['shipping'],
+                'final_amount'    => $totals['final'],
+                'paid_amount'     => $totals['paid'],
+                'due_amount'      => $totals['due'],
                 'payment_method'  => $request->payment_method,
                 'sale_origin'     => 'POS',
                 'created_by'      => auth()->id(),
             ]);
 
-            foreach ($cart as $item) {
-                $variantId = $item['type'] === 'variant' ? $item['id'] : null;
-                $productId = $variantId ? ProductVariant::find($variantId)?->product_id : $item['id'];
-
-                if (!$productId || !Product::find($productId)) {
-                    continue; // Skip invalid product
-                }
-
-                $unitId     = $item['unit_id'] ?? null;
-                $quantity   = $item['qty'];
-                $unitPrice  = $item['actual_price'];
-                $totalPrice = $unitPrice * $quantity;
-
-                $unit = Unit::find($unitId);
-                $baseQty = $quantity * ($unit->conversion_factor ?? 1);
+            foreach ($lines as $line) {
+                $productId  = $line['product_id'];
+                $variantId  = $line['variant_id'];
+                $unitId     = $line['unit_id'];
+                $quantity   = $line['quantity'];
+                $unitPrice  = $line['unit_price'];
+                $totalPrice = $line['total_price'];
+                $baseQty    = $line['base_qty'];
 
                 SaleItem::create([
                     'sale_id'               => $sale->id,
@@ -366,14 +376,14 @@ class SaleController extends Controller
             }
 
             // Handle payment — 'in' = money enters the business from customer
-            if ($request->amount_paid > 0) {
+            if ($totals['paid'] > 0) {
                 Payment::create([
                     'entity_type'      => 'customer',
                     'entity_id'        => $request->customer_id,
                     'transaction_type' => 'in',
                     'ref_type'         => 'sale',
                     'ref_id'           => $sale->id,
-                    'amount'           => $request->amount_paid,
+                    'amount'           => $totals['paid'],
                     'payment_method'   => $request->payment_method,
                     'created_by'       => auth()->id(),
                     'note'             => null,
@@ -381,7 +391,7 @@ class SaleController extends Controller
             }
 
             // Adjust balance
-            $dueAmount = $request->balance_due;
+            $dueAmount = $totals['due'];
             if ($dueAmount > 0) {
                 Customer::where('id', $request->customer_id)->increment('balance', $dueAmount);
             } elseif ($dueAmount < 0) {
@@ -494,6 +504,104 @@ class SaleController extends Controller
         $pdf->setPaper('a4', 'portrait');
 
         return $pdf->download('sale-invoice-' . $sale->invoice_number . '.pdf');
+    }
+
+    /**
+     * Rebuild sale lines from the posted cart, pricing every line from the database.
+     *
+     * The POS and sale screens render prices from products.actual_price (or the
+     * variant's) and offer no way to override them, so the price is looked up here
+     * rather than trusted from the posted cart, which the browser controls.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildSaleLines(array $cart): array
+    {
+        $lines = [];
+
+        foreach ($cart as $item) {
+            $isVariant = ($item['type'] ?? null) === 'variant';
+            $variant   = $isVariant ? ProductVariant::find($item['id'] ?? null) : null;
+
+            if ($isVariant && !$variant) {
+                \Log::warning('Skipping unknown variant during sale.', ['item' => $item]);
+                continue;
+            }
+
+            $productId = $variant ? $variant->product_id : ($item['id'] ?? null);
+            $product   = $productId ? Product::find($productId) : null;
+
+            if (!$product) {
+                \Log::warning('Skipping unknown product during sale.', ['item' => $item]);
+                continue;
+            }
+
+            $quantity = (float) ($item['qty'] ?? 0);
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            // Authoritative price, matching what the screen displayed.
+            $priceSource = $variant ?: $product;
+            $unitPrice   = round((float) $priceSource->actual_price, 2);
+
+            $unit    = isset($item['unit_id']) ? Unit::find($item['unit_id']) : null;
+            $baseQty = $quantity * ($unit->conversion_factor ?? 1);
+
+            $lines[] = [
+                'product_id'  => $product->id,
+                'variant_id'  => $variant?->id,
+                'unit_id'     => $unit?->id,
+                'name'        => $product->name,
+                'quantity'    => $quantity,
+                'base_qty'    => $baseQty,
+                'unit_price'  => $unitPrice,
+                'total_price' => round($unitPrice * $quantity, 2),
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Recompute a sale's money figures on the server.
+     *
+     * This mirrors the arithmetic both screens perform in JavaScript, so the
+     * cashier sees exactly the numbers that get recorded — the difference is that
+     * the recorded totals are derived from the priced lines and the cashier's own
+     * discount, tax and shipping entries, never read back from hidden form fields.
+     *
+     * @return array<string, float|string>
+     */
+    private function computeSaleTotals(array $lines, Request $request): array
+    {
+        $subtotal = round(array_sum(array_column($lines, 'total_price')), 2);
+
+        $discountType = $request->input('discount_type') === 'percentage' ? 'percentage' : 'fixed';
+        $discountRate = max(0, (float) $request->input('discountRate', 0));
+
+        $discount = $discountType === 'percentage'
+            ? round($subtotal * min($discountRate, 100) / 100, 2)
+            : round(min($discountRate, $subtotal), 2);   // never discount below zero
+
+        $taxRate = min(100, max(0, (float) ($request->input('taxrate') ?? $request->input('taxRate') ?? 0)));
+        $tax     = round(($subtotal - $discount) * $taxRate / 100, 2);
+
+        $shipping = round(max(0, (float) $request->input('shipping', 0)), 2);
+        $final    = round($subtotal - $discount + $tax + $shipping, 2);
+        $paid     = round(max(0, (float) $request->input('amount_paid', 0)), 2);
+
+        return [
+            'subtotal'      => $subtotal,
+            'discount'      => $discount,
+            'discount_type' => $discountType,
+            'tax'           => $tax,
+            'tax_rate'      => $taxRate,
+            'shipping'      => $shipping,
+            'final'         => $final,
+            'paid'          => $paid,
+            'due'           => round($final - $paid, 2),
+        ];
     }
 
     public function pos(Request $request){
@@ -682,6 +790,19 @@ class SaleController extends Controller
     }
 
     public function posProcess(Request $request){
+        $request->validate([
+            'customer_id'    => ['required', 'exists:customers,id'],
+            'branch_id'      => ['required', 'exists:branches,id'],
+            'cart_data'      => ['required', 'string'],
+            'payment_method' => ['required', 'in:cash,card'],
+            'amount_paid'    => ['required', 'numeric', 'min:0'],
+            'discount_type'  => ['nullable', 'in:fixed,percentage'],
+            'discountRate'   => ['nullable', 'numeric', 'min:0'],
+            'taxrate'        => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'taxRate'        => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'shipping'       => ['nullable', 'numeric', 'min:0'],
+        ]);
+
         $year = date('Y');
 
         // Generate the next invoice number
@@ -709,29 +830,33 @@ class SaleController extends Controller
         try {
             $cart = json_decode($request->cart_data, true);
 
-            if (json_last_error() !== JSON_ERROR_NONE || !is_array($cart)) {
+            if (json_last_error() !== JSON_ERROR_NONE || !is_array($cart) || empty($cart)) {
                 throw new \Exception('Invalid cart data.');
             }
 
+            // Price every line from the database and derive the totals here.
+            // Neither screen has a price-override field, so the prices and totals
+            // in the posted form are only a mirror of what the server already
+            // knows — and the browser is free to rewrite them before posting.
+            $lines = $this->buildSaleLines($cart);
+            if (empty($lines)) {
+                throw new \Exception('No valid products in the cart.');
+            }
+
+            $totals = $this->computeSaleTotals($lines, $request);
+
             // PRE-FLIGHT STOCK CHECK — verify every item before any DB write (locked to prevent race conditions)
-            foreach ($cart as $item) {
-                $variantId = $item['type'] === 'variant' ? $item['id'] : null;
-                $productId = $variantId ? optional(ProductVariant::find($variantId))->product_id : ($item['id'] ?? null);
-                if (!$productId) continue;
-
-                $unit    = Unit::find($item['unit_id'] ?? null);
-                $baseQty = ($item['qty'] ?? 0) * ($unit->conversion_factor ?? 1);
-
-                $available = InventoryStock::where('product_id', $productId)
-                    ->where('variant_id', $variantId)
+            foreach ($lines as $line) {
+                $available = InventoryStock::where('product_id', $line['product_id'])
+                    ->where('variant_id', $line['variant_id'])
                     ->where('warehouse_id', $warehouse_id)
                     ->lockForUpdate()
                     ->value('quantity_in_base_unit') ?? 0;
 
-                if ($available < $baseQty) {
+                if ($available < $line['base_qty']) {
                     throw new \Exception(
-                        'Insufficient stock for "' . ($item['name'] ?? 'product') .
-                        '". Available: ' . (int)$available . ', Requested: ' . (int)$baseQty . '.'
+                        'Insufficient stock for "' . $line['name'] .
+                        '". Available: ' . (int)$available . ', Requested: ' . (int)$line['base_qty'] . '.'
                     );
                 }
             }
@@ -742,34 +867,27 @@ class SaleController extends Controller
                 'branch_id'       => $request->branch_id,
                 'invoice_number'  => $invoiceNo,
                 'sale_date'       => now(),
-                'total_amount'    => $request->subtotal,
-                'discount_amount' => $request->discount,
-                'discount_type'   => $request->input('discount_type', 'fixed'),
-                'tax_amount'      => $request->tax,
-                'shipping'        => $request->shipping,
-                'final_amount'    => $request->total_payable,
-                'paid_amount'     => $request->amount_paid,
-                'due_amount'      => $request->balance_due,
+                'total_amount'    => $totals['subtotal'],
+                'discount_amount' => $totals['discount'],
+                'discount_type'   => $totals['discount_type'],
+                'tax_amount'      => $totals['tax'],
+                'shipping'        => $totals['shipping'],
+                'final_amount'    => $totals['final'],
+                'paid_amount'     => $totals['paid'],
+                'due_amount'      => $totals['due'],
                 'payment_method'  => $request->payment_method,
                 'sale_origin'     => 'POS',
                 'created_by'      => auth()->id(),
             ]);
 
-            foreach ($cart as $item) {
-                $variantId = $item['type'] === 'variant' ? $item['id'] : null;
-                $productId = $variantId ? ProductVariant::find($variantId)?->product_id : $item['id'];
-
-                if (!$productId || !Product::find($productId)) {
-                    continue; // Skip invalid product
-                }
-
-                $unitId     = $item['unit_id'] ?? null;
-                $quantity   = $item['qty'];
-                $unitPrice  = $item['actual_price'];
-                $totalPrice = $unitPrice * $quantity;
-
-                $unit = Unit::find($unitId);
-                $baseQty = $quantity * ($unit->conversion_factor ?? 1);
+            foreach ($lines as $line) {
+                $productId  = $line['product_id'];
+                $variantId  = $line['variant_id'];
+                $unitId     = $line['unit_id'];
+                $quantity   = $line['quantity'];
+                $unitPrice  = $line['unit_price'];
+                $totalPrice = $line['total_price'];
+                $baseQty    = $line['base_qty'];
 
                 SaleItem::create([
                     'sale_id'               => $sale->id,
@@ -809,14 +927,14 @@ class SaleController extends Controller
             }
 
             // Handle payment — 'in' = money enters the business from customer
-            if ($request->amount_paid > 0) {
+            if ($totals['paid'] > 0) {
                 Payment::create([
                     'entity_type'      => 'customer',
                     'entity_id'        => $request->customer_id,
                     'transaction_type' => 'in',
                     'ref_type'         => 'sale',
                     'ref_id'           => $sale->id,
-                    'amount'           => $request->amount_paid,
+                    'amount'           => $totals['paid'],
                     'payment_method'   => $request->payment_method,
                     'created_by'       => auth()->id(),
                     'note'             => null,
@@ -824,7 +942,7 @@ class SaleController extends Controller
             }
 
             // Adjust balance
-            $dueAmount = $request->balance_due;
+            $dueAmount = $totals['due'];
             if ($dueAmount > 0) {
                 Customer::where('id', $request->customer_id)->increment('balance', $dueAmount);
             } elseif ($dueAmount < 0) {
@@ -970,14 +1088,13 @@ class SaleController extends Controller
                     $amountToPay = $order->due_amount; // Amount that was due
 
                     Payment::create([
-                        'sale_id'          => $order->id, // Associate directly with the sale
+                        'entity_type'      => 'customer', // NOT NULL — the insert fails without it
                         'entity_id'        => $order->customer_id,
                         'amount'           => $amountToPay,
-                        'payment_method'   => $order->payment_method, // Assuming the final payment uses the same method or a new one
-                        'payment_date'     => Carbon::now(),
+                        'payment_method'   => $order->payment_method,
                         'transaction_type' => 'in', // Money coming IN to the business
-                        'ref_type'         => 'sale', // Specific type for sale payment
-                        'ref_id'           => $order->id, // Reference to the sale ID
+                        'ref_type'         => 'sale',
+                        'ref_id'           => $order->id,
                         'note'             => 'Final payment upon delivery for order #' . $order->invoice_number,
                         'created_by'       => Auth::id(), // Admin user who marked as delivered
                     ]);
@@ -986,6 +1103,10 @@ class SaleController extends Controller
                     $order->paid_amount += $amountToPay; // Add the new payment to paid_amount
                     $order->due_amount = 0;              // Set due amount to zero
                     $order->save();
+
+                    // The customer owed this from the moment the order was placed;
+                    // paying on delivery clears it.
+                    Customer::where('id', $order->customer_id)->decrement('balance', $amountToPay);
                 }
             }
 
@@ -996,52 +1117,67 @@ class SaleController extends Controller
                 if ($order->paid_amount > 0) {
                     // Create a new payment record for the refund (money going OUT)
                     Payment::create([
-                        'sale_id'          => $order->id, // Associate directly with the sale
+                        'entity_type'      => 'customer', // NOT NULL — the insert fails without it
                         'entity_id'        => $order->customer_id,
                         'amount'           => $order->paid_amount, // The amount being refunded
                         'payment_method'   => $order->payment_method, // Refund via the original payment method
-                        'payment_date'     => Carbon::now(),
                         'transaction_type' => 'out', // Money going OUT from the business (refund)
                         'ref_type'         => 'sales_return', // Custom type for sale refund
                         'ref_id'           => $order->id, // Reference the original sale ID
                         'note'             => 'Refund for cancelled order #' . $order->invoice_number,
                         'created_by'       => Auth::id(), // Admin user who initiated the cancellation/refund
                     ]);
-
-                    // Update order's due_amount to 0, implying refund processed and no more balance
-                    $order->due_amount = 0;
-                    // $order->save();
                 }
 
-                // 2. Add items back to inventory stocks and show in stock ledger
-                $order->load('items'); // Ensure sale items are loaded
-                foreach ($order->items as $item) {
-                    // Find the corresponding stock entry
-                    $stock = InventoryStock::where('product_id', $item->product_id)
-                                           ->where('variant_id', $item->variant_id) // Use variant_id as per your model/schema
-                                           ->first();
-                    if ($stock) {
-                        // Increase stock quantity
-                        $stock->quantity_in_base_unit += $item->quantity; // Use quantity_in_base_unit based on your schema
-                        // $stock->save();
+                // A cancelled order is no longer owed, whether or not it was paid.
+                if ($order->due_amount > 0) {
+                    Customer::where('id', $order->customer_id)->decrement('balance', $order->due_amount);
+                }
 
-                        // Create StockLedger entry for the returned item
-                        StockLedger::create([
-                            'product_id'                 => $item->product_id,
-                            'variant_id'                 => $item->variant_id, // Use variant_id as per your image/schema
-                            'warehouse_id'               => $order->branch->warehouse->id ?? null, // Assuming branch has a warehouse relation
-                            'ref_type'                   => 'cancelled_order_return', // Specific type for cancelled order stock return
-                            'ref_id'                     => $order->id, // Reference the original sale ID
-                            'quantity_change_in_base_unit' => $item->quantity, // Quantity added back
-                            'unit_cost'                  => $item->unit_price, // Use the unit price from the sale item as the cost basis
-                            'direction'                  => 'in', // Stock is coming back IN
-                            'created_by'                 => Auth::id(), // User who initiated the cancellation
-                            'created_at'                 => Carbon::now(),
-                        ]);
-                    } else {
-                        // Log an error if stock item is not found, but don't prevent transaction completion
-                        \Log::error("Stock not found for product ID {$item->product_id} and variant ID {$item->product_variant_id} during order cancellation #{$order->id}.");
+                $order->due_amount = 0;
+                $order->save();
+
+                // 2. Add items back to inventory stock and record it in the ledger.
+                //    The quantity restored must be quantity_in_base_unit — that is
+                //    what the sale deducted — and the row is created if the branch
+                //    warehouse has never stocked this product before, so the ledger
+                //    and the stock table can never drift apart.
+                $order->load('items');
+                $warehouseId = $order->branch->warehouse_id ?? $order->branch->warehouse->id ?? null;
+
+                foreach ($order->items as $item) {
+                    $restoreQty = (float) $item->quantity_in_base_unit;
+
+                    if ($restoreQty <= 0) {
+                        continue;
                     }
+
+                    if (!$warehouseId) {
+                        \Log::error("Cannot restore stock for cancelled order #{$order->id}: branch has no warehouse.");
+                        break;
+                    }
+
+                    InventoryStock::firstOrCreate(
+                        [
+                            'product_id'   => $item->product_id,
+                            'variant_id'   => $item->variant_id,
+                            'warehouse_id' => $warehouseId,
+                        ],
+                        ['quantity_in_base_unit' => 0]
+                    )->increment('quantity_in_base_unit', $restoreQty);
+
+                    StockLedger::create([
+                        'product_id'                   => $item->product_id,
+                        'variant_id'                   => $item->variant_id,
+                        'warehouse_id'                 => $warehouseId,
+                        'ref_type'                     => 'cancelled_order_return',
+                        'ref_id'                       => $order->id,
+                        'quantity_change_in_base_unit' => $restoreQty,
+                        'unit_cost'                    => $item->unit_price,
+                        'direction'                    => 'in',
+                        'created_by'                   => Auth::id(),
+                        'created_at'                   => Carbon::now(),
+                    ]);
                 }
             }
 

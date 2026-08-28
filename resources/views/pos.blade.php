@@ -458,7 +458,7 @@
         document.addEventListener("DOMContentLoaded", function () {
             Swal.fire({
                 title: 'Invoice Preview',
-                html: {!! json_encode($invoiceHtml) !!},
+                html: {!! json_encode($invoiceHtml, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!},
                 width: 600,
                 showCancelButton: true,
                 confirmButtonText: 'Print',

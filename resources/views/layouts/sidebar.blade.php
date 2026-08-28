@@ -688,7 +688,10 @@ body.sidebar-collapsed .iq-sidebar-logo img {
                                             <h5 class="mb-1">{{ Auth::user()->email }}</h5>
                                             <div class="d-flex align-items-center justify-content-center mt-3">
                                                 <a href="{{ route('profile.edit') }}" class="btn border mr-2">Profile</a>
-                                                <a href="{{ route('logout') }}" class="btn border">Log Out</a>
+                                                <form method="POST" action="{{ route('logout') }}" class="d-inline">
+                                                    @csrf
+                                                    <button type="submit" class="btn border">Log Out</button>
+                                                </form>
                                             </div>
                                         </div>
                                     </div>

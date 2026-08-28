@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\InvoiceSentMail;
 use App\Models\Branch;
 use App\Models\Customer;
+use App\Models\DiscountRule;
 use App\Models\InventoryStock;
 use App\Models\Payment;
 use App\Models\Product;
@@ -96,42 +97,48 @@ class CheckoutController extends Controller
         DB::beginTransaction();
 
         try {
-            $cart = json_decode($request->cart_data, true);
-
-            if (json_last_error() !== JSON_ERROR_NONE || !is_array($cart) || empty($cart)) {
-                throw new \Exception('Invalid or empty cart data provided.');
-            }
-
             $customerId = Auth::id();
             if (!$customerId) {
                 throw new \Exception('User not authenticated. Cannot process sale.');
             }
 
-            // Retrieve values from the request
-            $discountAmount = $request->coupon_discount_amount ?? 0;
-            $taxAmount      = $request->tax_amount ?? 0;
-            $shippingCost   = $request->shipping ?? 0;
-            $finalAmount    = $request->total_payable;
-            $paidAmount     = $request->amount_paid ?? 0;
-            $paymentMethod  = $request->payment_method ?? 'cash';
+            // ── The order is priced entirely server-side ──────────────────────
+            // Nothing about price, discount, tax, total, or amount paid is read
+            // from the request. The browser controls those fields, so trusting
+            // them would let any customer set their own total. Quantities come
+            // from the server-side session cart; every price is looked up from
+            // the database at this moment.
+            $sessionCart = session()->get('cart', []);
+            if (!is_array($sessionCart) || empty($sessionCart)) {
+                throw new \Exception('Your cart is empty.');
+            }
+
+            $lines = $this->priceCartServerSide($sessionCart);
+            if (empty($lines)) {
+                throw new \Exception('None of the items in your cart are available any more.');
+            }
+
+            $subtotal       = round(array_sum(array_column($lines, 'total_price')), 2);
+            $discountAmount = $this->resolveCouponDiscount($subtotal);
+            $taxAmount      = 0.00;   // no storefront tax rule is configured
+            $shippingCost   = 0.00;   // no storefront shipping rule is configured
+            $finalAmount    = round(max(0, $subtotal - $discountAmount + $taxAmount + $shippingCost), 2);
+
+            // Cash on delivery is the only storefront payment method, so no money
+            // has been received yet. updateStatus() records the payment when the
+            // order is marked delivered.
+            $paidAmount    = 0.00;
+            $paymentMethod = 'cash';
 
             // PRE-FLIGHT STOCK CHECK — verify every cart item before any DB write
-            foreach ($cart as $item) {
-                $variantId = $item['variant_id'] ?? null;
-                $itemId    = $item['id'] ?? null;
-                $productId = $variantId ? optional(ProductVariant::find($variantId))->product_id : $itemId;
-                if (!$productId) continue;
-
-                $unit    = isset($item['unit_id']) ? Unit::find($item['unit_id']) : null;
-                $baseQty = ($item['quantity'] ?? 0) * ($unit->conversion_factor ?? 1);
-
-                $available = InventoryStock::where('product_id', $productId)
-                    ->where('variant_id', $variantId)
+            foreach ($lines as $line) {
+                $available = InventoryStock::where('product_id', $line['product_id'])
+                    ->where('variant_id', $line['variant_id'])
                     ->sum('quantity_in_base_unit');
 
-                if ($available < $baseQty) {
+                if ($available < $line['base_qty']) {
                     throw new \Exception(
-                        'Sorry, "' . ($item['name'] ?? 'a product') .
+                        'Sorry, "' . $line['name'] .
                         '" is out of stock. Available: ' . (int)$available . '.'
                     );
                 }
@@ -142,7 +149,7 @@ class CheckoutController extends Controller
                 'branch_id'      => $branchId,
                 'invoice_number' => $invoiceNo,
                 'sale_date'      => now(),
-                'total_amount'   => $finalAmount,
+                'total_amount'   => $subtotal,
                 'discount_amount'=> $discountAmount,
                 'tax_amount'     => $taxAmount,
                 'shipping'       => $shippingCost,
@@ -152,27 +159,20 @@ class CheckoutController extends Controller
                 'payment_method' => $paymentMethod,
                 'sale_origin'    => 'E-commerce',
                 'status'         => 'pending',
-                'created_by'     => auth()->id(),
+                // Placed by the customer, not by staff. auth()->id() here is a
+                // CUSTOMER id and created_by is a foreign key to users.id.
+                'created_by'     => null,
             ]);
 
-            foreach ($cart as $item) {
-                $variantId = $item['variant_id'] ?? null;
-                $itemId    = $item['id'] ?? null;
-                $productId = $variantId ? ProductVariant::find($variantId)?->product_id : $itemId;
-
-                if (!$productId || !Product::find($productId)) {
-                    \Log::warning("Skipping invalid product/variant during checkout. Item: " . json_encode($item));
-                    continue;
-                }
-
-                $unitId      = $item['unit_id'] ?? null;
-                $quantity    = $item['quantity'] ?? 0;
-                $unitPrice   = $item['price'] ?? 0;
-                $actualPrice = $item['actual_price'] ?? $unitPrice;
-                $totalPrice  = $unitPrice * $quantity;
-
-                $unit    = $unitId ? Unit::find($unitId) : null;
-                $baseQty = $quantity * ($unit->conversion_factor ?? 1);
+            foreach ($lines as $line) {
+                $productId   = $line['product_id'];
+                $variantId   = $line['variant_id'];
+                $unitId      = $line['unit_id'];
+                $quantity    = $line['quantity'];
+                $unitPrice   = $line['unit_price'];
+                $actualPrice = $line['actual_price'];
+                $totalPrice  = $line['total_price'];
+                $baseQty     = $line['base_qty'];
 
                 SaleItem::create([
                     'sale_id'               => $sale->id,
@@ -209,7 +209,7 @@ class CheckoutController extends Controller
                         'quantity_change_in_base_unit' => $deduct,
                         'unit_cost'                    => $actualPrice,
                         'direction'                    => 'out',
-                        'created_by'                   => auth()->id(),
+                        'created_by'                   => null, // storefront order, no staff user
                     ]);
                     $remaining -= $deduct;
                 }
@@ -226,7 +226,7 @@ class CheckoutController extends Controller
                     'ref_id'           => $sale->id,
                     'amount'           => $paidAmount,
                     'payment_method'   => $paymentMethod,
-                    'created_by'       => auth()->id(),
+                    'created_by'       => null, // storefront order, no staff user
                     'note'             => 'E-commerce payment for ' . $invoiceNo,
                 ]);
             }
@@ -274,6 +274,98 @@ class CheckoutController extends Controller
             \Log::error('Checkout process failed: ' . $e->getMessage() . ' on line ' . $e->getLine() . ' in ' . $e->getFile());
             return back()->withInput()->with('error', 'Something went wrong during checkout. Please try again. Error: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Turn the session cart into authoritative order lines.
+     *
+     * Quantity is the only value taken from the cart. Every price is read from
+     * the database here, at checkout time, so neither a tampered session nor a
+     * tampered form can change what the customer is charged.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function priceCartServerSide(array $sessionCart): array
+    {
+        $lines = [];
+
+        foreach ($sessionCart as $item) {
+            $quantity = (int) ($item['quantity'] ?? 0);
+            if ($quantity < 1) {
+                continue;
+            }
+
+            $variantId = $item['variant_id'] ?? null;
+            $variant   = $variantId ? ProductVariant::find($variantId) : null;
+
+            // A cart line naming a variant that no longer exists is not priceable.
+            if ($variantId && !$variant) {
+                \Log::warning('Skipping unknown variant during checkout.', ['item' => $item]);
+                continue;
+            }
+
+            $productId = $variant ? $variant->product_id : ($item['id'] ?? null);
+            $product   = $productId ? Product::find($productId) : null;
+
+            if (!$product) {
+                \Log::warning('Skipping unknown product during checkout.', ['item' => $item]);
+                continue;
+            }
+
+            // Authoritative price: the current discounted price from the database.
+            $priceSource = $variant ?: $product;
+            $unitPrice   = round((float) $priceSource->discounted_price, 2);
+            $actualPrice = round((float) $priceSource->actual_price, 2);
+
+            $unit    = isset($item['unit_id']) ? Unit::find($item['unit_id']) : null;
+            $baseQty = $quantity * ($unit->conversion_factor ?? 1);
+
+            $lines[] = [
+                'product_id'   => $product->id,
+                'variant_id'   => $variant?->id,
+                'unit_id'      => $unit?->id,
+                'name'         => $product->name,
+                'quantity'     => $quantity,
+                'base_qty'     => $baseQty,
+                'unit_price'   => $unitPrice,
+                'actual_price' => $actualPrice,
+                'total_price'  => round($unitPrice * $quantity, 2),
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Recompute the coupon discount against the server-calculated subtotal.
+     *
+     * Only the coupon *code* is carried in the session. The percentage and the
+     * resulting amount are always resolved from the database, and the coupon is
+     * re-checked here in case it expired between being applied and checkout.
+     */
+    private function resolveCouponDiscount(float $subtotal): float
+    {
+        $code = session('coupon_code');
+
+        if (!$code) {
+            return 0.00;
+        }
+
+        $rule = DiscountRule::where('coupon_code', $code)
+            ->where('type', 'coupon')
+            ->whereDate('start_date', '<=', now())
+            ->whereDate('end_date', '>=', now())
+            ->first();
+
+        if (!$rule) {
+            Session::forget(['coupon_code', 'coupon_discount', 'coupon_percentage']);
+
+            return 0.00;
+        }
+
+        $percentage = min(100, max(0, (float) $rule->discount));
+
+        return round($subtotal * $percentage / 100, 2);
     }
 
     public function orders()

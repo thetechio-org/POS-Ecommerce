@@ -1,17 +1,30 @@
 <?php
 
+use App\Models\Role;
 use App\Models\User;
 
+/**
+ * This application serves the login screen at "/" rather than "/login", and
+ * refuses to authenticate a user whose status is not Active.
+ */
+function activeUser(): User
+{
+    return User::factory()->create([
+        'role_id' => Role::firstOrCreate(['name' => 'Admin'])->id,
+        'status'  => 'Active',
+    ]);
+}
+
 test('login screen can be rendered', function () {
-    $response = $this->get('/login');
+    $response = $this->get(route('login'));
 
     $response->assertStatus(200);
 });
 
 test('users can authenticate using the login screen', function () {
-    $user = User::factory()->create();
+    $user = activeUser();
 
-    $response = $this->post('/login', [
+    $response = $this->post(route('login'), [
         'email' => $user->email,
         'password' => 'password',
     ]);
@@ -21,9 +34,9 @@ test('users can authenticate using the login screen', function () {
 });
 
 test('users can not authenticate with invalid password', function () {
-    $user = User::factory()->create();
+    $user = activeUser();
 
-    $this->post('/login', [
+    $this->post(route('login'), [
         'email' => $user->email,
         'password' => 'wrong-password',
     ]);
@@ -32,9 +45,9 @@ test('users can not authenticate with invalid password', function () {
 });
 
 test('users can logout', function () {
-    $user = User::factory()->create();
+    $user = activeUser();
 
-    $response = $this->actingAs($user)->post('/logout');
+    $response = $this->actingAs($user)->post(route('logout'));
 
     $this->assertGuest();
     $response->assertRedirect('/');

@@ -43,11 +43,11 @@ class PaymentGatewayController extends Controller
             $status      = $transaction->status;
         } catch (\Exception $e) {
             Log::error('JazzCash callback error', ['error' => $e->getMessage()]);
-            return redirect()->route('store.orders.index')
+            return redirect()->route('store.orders')
                 ->with('error', 'Payment verification failed. Contact support.');
         }
 
-        return redirect()->route('store.orders.index')
+        return redirect()->route('store.orders')
             ->with($status === 'success' ? 'success' : 'error',
                    $status === 'success' ? 'Payment successful! Your order is confirmed.' : 'Payment failed. Please try again.');
     }
@@ -62,11 +62,11 @@ class PaymentGatewayController extends Controller
             $status      = $transaction->status;
         } catch (\Exception $e) {
             Log::error('EasyPaisa callback error', ['error' => $e->getMessage()]);
-            return redirect()->route('store.orders.index')
+            return redirect()->route('store.orders')
                 ->with('error', 'Payment verification failed. Contact support.');
         }
 
-        return redirect()->route('store.orders.index')
+        return redirect()->route('store.orders')
             ->with($status === 'success' ? 'success' : 'error',
                    $status === 'success' ? 'Payment successful! Your order is confirmed.' : 'Payment failed. Please try again.');
     }

@@ -9,41 +9,70 @@ class SmsService
 {
     /**
      * Send an SMS via the configured Pakistani SMS gateway.
+     *
      * Configure in .env:
-     *   SMS_GATEWAY=smspk        (smspk | ecosms | zong)
-     *   SMS_API_KEY=your_key
-     *   SMS_SENDER_ID=YourBrand
+     *   SMS_GATEWAY=smspk            (smspk | ecosms)
+     *   SMSPK_API_KEY=...            SMSPK_SENDER_ID=YourBrand
+     *   ECOSMS_USERNAME=...          ECOSMS_PASSWORD=...   ECOSMS_SENDER_ID=YourBrand
      */
     public function send(string $phone, string $message): bool
     {
-        if (!config('services.sms.key')) {
-            Log::info('SMS not sent (no API key configured). To: ' . $phone . ' | ' . $message);
+        $gateway = config('services.sms.gateway', 'smspk');
+
+        if (! $this->isConfigured($gateway)) {
+            Log::info("SMS not sent — the '{$gateway}' gateway has no credentials configured. To: {$phone} | {$message}");
+
             return false;
         }
 
         $phone = $this->normalizePhone($phone);
 
         try {
-            $gateway = config('services.sms.gateway', 'smspk');
-
             return match ($gateway) {
-                'smspk'   => $this->sendViaSMSPK($phone, $message),
-                'ecosms'  => $this->sendViaEcoSMS($phone, $message),
-                default   => $this->sendViaSMSPK($phone, $message),
+                'ecosms' => $this->sendViaEcoSMS($phone, $message),
+                default  => $this->sendViaSMSPK($phone, $message),
             };
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::warning('SMS send failed: ' . $e->getMessage());
+
             return false;
         }
     }
 
+    /**
+     * Each gateway authenticates differently, so check the credentials that the
+     * selected one actually needs.
+     */
+    private function isConfigured(string $gateway): bool
+    {
+        if ($gateway === 'ecosms') {
+            return (bool) config('services.sms.ecosms.username')
+                && (bool) config('services.sms.ecosms.password');
+        }
+
+        return (bool) config('services.sms.smspk.api_key');
+    }
+
+    /**
+     * A short-fused HTTP client.
+     *
+     * SMS goes out inline during checkout and order-status changes, so a gateway
+     * that stops responding must not hold a PHP-FPM worker open. The client's
+     * default is a 30-second wait; on a shared server, enough workers stuck for
+     * 30 seconds will exhaust the pool and take neighbouring sites down with it.
+     */
+    private function http(): \Illuminate\Http\Client\PendingRequest
+    {
+        return Http::connectTimeout(3)->timeout(5);
+    }
+
     private function sendViaSMSPK(string $phone, string $message): bool
     {
-        $response = Http::get('https://api.smspk.net/sms/send', [
-            'api_key'   => config('services.sms.key'),
+        $response = $this->http()->get('https://api.smspk.net/sms/send', [
+            'api_key'   => config('services.sms.smspk.api_key'),
             'to'        => $phone,
             'message'   => $message,
-            'sender_id' => config('services.sms.sender_id', 'INFO'),
+            'sender_id' => config('services.sms.smspk.sender_id', 'POS'),
         ]);
 
         return $response->successful();
@@ -51,11 +80,12 @@ class SmsService
 
     private function sendViaEcoSMS(string $phone, string $message): bool
     {
-        $response = Http::post('https://www.ecosms.pk/api/sendsms', [
-            'api_key'   => config('services.sms.key'),
-            'sender'    => config('services.sms.sender_id', 'INFO'),
-            'number'    => $phone,
-            'message'   => $message,
+        $response = $this->http()->post('https://www.ecosms.pk/api/sendsms', [
+            'username' => config('services.sms.ecosms.username'),
+            'password' => config('services.sms.ecosms.password'),
+            'sender'   => config('services.sms.ecosms.sender_id', 'POS'),
+            'number'   => $phone,
+            'message'  => $message,
         ]);
 
         return $response->successful();

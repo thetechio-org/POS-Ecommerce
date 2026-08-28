@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Sale;
 use App\Models\PaymentTransaction;
+use Illuminate\Support\Facades\Log;
 
 class PaymentGatewayService
 {
@@ -61,17 +62,32 @@ class PaymentGatewayService
 
     /**
      * Process JazzCash/EasyPaisa callback and record the transaction.
+     *
+     * This endpoint is public (the gateway posts to it directly and cannot carry
+     * a CSRF token), so the gateway's own signature is the ONLY thing proving the
+     * request is genuine. Verification therefore happens before anything else and
+     * fails closed — never relax this without replacing it with an equivalent check.
+     *
+     * @throws \RuntimeException when the callback cannot be trusted.
      */
     public function handleCallback(array $data, string $gateway): PaymentTransaction
     {
+        // 1. Authenticate the caller. Nothing below runs for an unsigned request.
+        if (! $this->verifySignature($data, $gateway)) {
+            Log::warning('Rejected payment callback with an invalid signature', [
+                'gateway' => $gateway,
+                'sale_id' => $data['ppmpf_1'] ?? $data['sale_id'] ?? null,
+                'txn_ref' => $data['pp_TxnRefNo'] ?? $data['orderRefNum'] ?? null,
+            ]);
+
+            throw new \RuntimeException('Payment callback signature verification failed.');
+        }
+
         $saleId = $data['ppmpf_1'] ?? $data['sale_id'] ?? null;
         $sale   = Sale::findOrFail($saleId);
 
-        $responseCode = $data['pp_ResponseCode'] ?? $data['responseCode'] ?? '999';
-        $status       = ($responseCode === '000') ? 'success' : 'failed';
-
-        // Idempotency: prevent duplicate processing if gateway retries the callback
-        $transactionId = $data['pp_TxnRefNo'] ?? $data['transactionId'] ?? null;
+        // 2. Idempotency: a retried callback returns the original transaction untouched.
+        $transactionId = $data['pp_TxnRefNo'] ?? $data['transactionId'] ?? $data['orderRefNum'] ?? null;
         if ($transactionId) {
             $existing = PaymentTransaction::where('transaction_id', $transactionId)->first();
             if ($existing) {
@@ -79,10 +95,25 @@ class PaymentGatewayService
             }
         }
 
+        $responseCode = $data['pp_ResponseCode'] ?? $data['responseCode'] ?? '999';
+        $status       = ($responseCode === '000') ? 'success' : 'failed';
+
+        // 3. A signed success still has to be for the right amount, or it is not a
+        //    payment for this order. Record it as failed rather than crediting it.
+        if ($status === 'success' && ! $this->amountMatches($data, $sale, $gateway)) {
+            Log::warning('Payment callback amount did not match the sale total', [
+                'gateway'  => $gateway,
+                'sale_id'  => $sale->id,
+                'expected' => $sale->final_amount,
+            ]);
+
+            $status = 'failed';
+        }
+
         $transaction = PaymentTransaction::create([
             'sale_id'              => $sale->id,
             'gateway'              => $gateway,
-            'transaction_id'       => $data['pp_TxnRefNo'] ?? $data['transactionId'] ?? null,
+            'transaction_id'       => $transactionId,
             'pp_response_code'     => $responseCode,
             'pp_response_message'  => $data['pp_ResponseMessage'] ?? $data['responseMessage'] ?? null,
             'amount'               => $sale->final_amount,
@@ -90,7 +121,7 @@ class PaymentGatewayService
             'gateway_payload'      => $data,
         ]);
 
-        // If payment successful, mark sale as paid
+        // 4. Only a verified, correctly-priced success settles the sale.
         if ($status === 'success') {
             $sale->update([
                 'paid_amount' => $sale->final_amount,
@@ -100,6 +131,103 @@ class PaymentGatewayService
         }
 
         return $transaction;
+    }
+
+    /**
+     * Verify that the callback really came from the payment gateway.
+     */
+    private function verifySignature(array $data, string $gateway): bool
+    {
+        return match ($gateway) {
+            'jazzcash'  => $this->verifyJazzCashSignature($data),
+            'easypaisa' => $this->verifyEasyPaisaSignature($data),
+            default     => false,
+        };
+    }
+
+    /**
+     * JazzCash returns pp_SecureHash: an HMAC-SHA256, keyed with the integrity salt,
+     * over the salt followed by every non-empty pp_* / ppmpf_* field in key order.
+     */
+    private function verifyJazzCashSignature(array $data): bool
+    {
+        $salt     = (string) config('payment.jazzcash.integrity_salt');
+        $received = (string) ($data['pp_SecureHash'] ?? '');
+
+        if ($salt === '' || $received === '') {
+            return false;
+        }
+
+        $fields = [];
+        foreach ($data as $key => $value) {
+            if ($key === 'pp_SecureHash') {
+                continue;
+            }
+            if (! str_starts_with($key, 'pp_') && ! str_starts_with($key, 'ppmpf_')) {
+                continue;
+            }
+            if ($value === null || $value === '' || is_array($value)) {
+                continue;
+            }
+            $fields[$key] = $value;
+        }
+
+        ksort($fields);
+
+        $expected = hash_hmac('sha256', $salt . '&' . implode('&', $fields), $salt);
+
+        return hash_equals(strtolower($expected), strtolower($received));
+    }
+
+    /**
+     * EasyPaisa returns the same SHA-256 digest that was sent out, over
+     * storeId + amount + orderRefNum + postBackURL + hashKey.
+     *
+     * NOTE: EasyPaisa's response contract varies by merchant account type. If your
+     * account posts back a different field set, align this method with the hash
+     * specification in your merchant integration guide — but keep it failing closed.
+     */
+    private function verifyEasyPaisaSignature(array $data): bool
+    {
+        $hashKey  = (string) config('payment.easypaisa.hash_key');
+        $received = (string) ($data['signature'] ?? $data['pp_SecureHash'] ?? '');
+
+        if ($hashKey === '' || $received === '') {
+            return false;
+        }
+
+        $storeId     = (string) config('payment.easypaisa.store_id');
+        $postBackUrl = (string) config('payment.easypaisa.return_url');
+        $amount      = (string) ($data['amount'] ?? $data['transactionAmount'] ?? '');
+        $orderRefNum = (string) ($data['orderRefNum'] ?? $data['orderRefNumber'] ?? '');
+
+        if ($amount === '' || $orderRefNum === '') {
+            return false;
+        }
+
+        $expected = strtoupper(hash('sha256', $storeId . $amount . $orderRefNum . $postBackUrl . $hashKey));
+
+        return hash_equals($expected, strtoupper($received));
+    }
+
+    /**
+     * Confirm the gateway charged the amount this sale is actually for.
+     * JazzCash reports paisas; EasyPaisa reports rupees.
+     */
+    private function amountMatches(array $data, Sale $sale, string $gateway): bool
+    {
+        if ($gateway === 'jazzcash') {
+            $reported = $data['pp_Amount'] ?? null;
+
+            // Absent amount: the signature already covered the payload, so accept.
+            return $reported === null
+                || (int) $reported === (int) round($sale->final_amount * 100);
+        }
+
+        $reported = $data['amount'] ?? $data['transactionAmount'] ?? null;
+
+        return $reported === null
+            || abs((float) $reported - (float) $sale->final_amount) < 0.01;
     }
 
     /**

@@ -96,7 +96,7 @@
             </section>
 
             <!-- Delete Account (Admin only) -->
-            @if(auth()->user()->role->name === 'Admin')
+            @if(auth()->user()->role?->name === 'Admin')
             <section class="bg-white dark:bg-gray-800 rounded-xl shadow p-8 border border-red-200 dark:border-red-600">
                 <h2 class="text-2xl font-semibold text-red-600 dark:text-red-400 mb-4">Delete Account</h2>
                 <p class="text-sm text-gray-600 dark:text-gray-300 mb-6">

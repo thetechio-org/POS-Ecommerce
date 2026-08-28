@@ -16,6 +16,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => RoleMiddleware::class,
         ]);
+
+        // Payment gateways POST back cross-site and cannot carry a CSRF token.
+        // These endpoints authenticate the request by verifying the gateway's
+        // own HMAC signature instead — see PaymentGatewayService::verifySignature().
+        $middleware->validateCsrfTokens(except: [
+            'store/payment/*/callback',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

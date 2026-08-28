@@ -205,9 +205,12 @@ Route::middleware('auth', 'verified')->group(function () {
         Route::get('/{id}/pdf', [SaleController::class, 'downloadPdf'])->name('pdf');
 
     });
-     Route::get('e-commerce/orders', [SaleController::class, 'orders'])->name('orders.index');
-     Route::get('orders/{order}', [SaleController::class, 'show'])->name('orders.show');
-     Route::put('orders/{order}/status', [SaleController::class, 'updateStatus'])->name('orders.updateStatus')->middleware('auth');
+    // E-commerce orders — Admin and Manager only
+    Route::middleware('role:Admin,Manager')->group(function () {
+        Route::get('e-commerce/orders', [SaleController::class, 'orders'])->name('orders.index');
+        Route::get('orders/{order}', [SaleController::class, 'show'])->name('orders.show');
+        Route::put('orders/{order}/status', [SaleController::class, 'updateStatus'])->name('orders.updateStatus');
+    });
 
 
     //Sales Return
@@ -383,8 +386,10 @@ Route::prefix('store')->group(function () {
     });
 
     // Payment Gateway Callbacks (public — posted by the gateway)
-    Route::post('/payment/jazzcash/callback', [PaymentGatewayController::class, 'callbackJazzCash'])->name('payment.jazzcash.callback')->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
-    Route::post('/payment/easypaisa/callback', [PaymentGatewayController::class, 'callbackEasyPaisa'])->name('payment.easypaisa.callback')->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
+    // CSRF is excluded for these paths in bootstrap/app.php — the gateway's
+    // signature is verified inside the controller instead.
+    Route::post('/payment/jazzcash/callback', [PaymentGatewayController::class, 'callbackJazzCash'])->name('payment.jazzcash.callback');
+    Route::post('/payment/easypaisa/callback', [PaymentGatewayController::class, 'callbackEasyPaisa'])->name('payment.easypaisa.callback');
 });
 
 

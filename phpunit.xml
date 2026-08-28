@@ -22,8 +22,20 @@
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
-        <!-- <env name="DB_CONNECTION" value="sqlite"/> -->
-        <!-- <env name="DB_DATABASE" value=":memory:"/> -->
+        <!--
+            Every Feature test uses RefreshDatabase, which DROPS AND REBUILDS the
+            database it is pointed at. With these commented out the suite ran against
+            whatever .env specified — so `php artisan test` on a live server would
+            have destroyed production data.
+
+            An in-memory SQLite database is not an option here: several migrations
+            use raw MySQL DDL (ALTER TABLE ... MODIFY ... ENUM). So the suite is
+            pinned to a separate MySQL schema instead. Create it once with:
+                CREATE DATABASE pos_testing;
+            If it does not exist the suite fails immediately — which is the safe
+            way to fail.
+        -->
+        <env name="DB_DATABASE" value="pos_testing"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

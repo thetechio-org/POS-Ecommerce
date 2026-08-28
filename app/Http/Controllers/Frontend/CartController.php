@@ -14,34 +14,34 @@ use Carbon\Carbon;
 class CartController extends Controller
 {
     public function add(Request $request){
-        // dd($request->all());
         $cart = session()->get('cart', []);
         $id = $request->product_id;
-        $qty = $request->quantity ?? 1;
+        $qty = (int) ($request->quantity ?? 1);
+
+        if ($qty < 1) {
+            return redirect()->back()->with('error', 'Please choose a quantity of at least 1.');
+        }
 
         $product = Product::findOrFail($id);
-        $availableStock = $request->stock;
 
-        // Use hidden input price if sent, fallback to actual_price
-        $price = $request->input('price', $product->actual_price);
-
-        // --- New: Get Variant Information ---
+        // --- Variant information ---
         $variantId = $request->variant_id;
-        $variantName = null; // Initialize variant name
-        $variantImg = null;
-        $variantColor = null;
-        $variantSize = null;
+        $variant   = $variantId ? $product->variants()->find($variantId) : null;
 
-        if ($variantId) {
-
-            $variant = $product->variants()->find($variantId);
-            if ($variant) {
-                $variantName = $variant->variant_name;
-                $variantImg = $variant->product_img;
-                $variantSize = $variant->size;
-                $variantColor = $variant->color;
-            }
+        if ($variantId && !$variant) {
+            return redirect()->back()->with('error', 'That product option is no longer available.');
         }
+
+        $variantName  = $variant?->variant_name;
+        $variantImg   = $variant?->product_img;
+        $variantSize  = $variant?->size;
+        $variantColor = $variant?->color;
+
+        // Price and stock are read from the database, never from the request.
+        // The product page posts both as hidden inputs, which a customer can edit.
+        $priceSource    = $variant ?: $product;
+        $price          = round((float) $priceSource->discounted_price, 2);
+        $availableStock = (int) $priceSource->inventoryStocks()->sum('quantity_in_base_unit');
 
         $currentCartQuantity = isset($cart[$id]) ? $cart[$id]['quantity'] : 0;
         $newDesiredQuantity = $currentCartQuantity + $qty;
@@ -67,8 +67,8 @@ class CartController extends Controller
             'id' => $id,
             'name' => $product->name,
             'stock' => $availableStock,
-            'price' => $price, // ✅ Discounted or final price
-            'actual_price' => $product->actual_price, // ✅ Store original price
+            'price' => $price,
+            'actual_price' => round((float) $priceSource->actual_price, 2),
             'quantity' => $newDesiredQuantity,
             'image' => $product->product_img, // ✅ Product's main image
             // --- New: Add variant information ---
@@ -209,7 +209,10 @@ class CartController extends Controller
 
     public function applyCoupon(Request $request){
         $couponCode = $request->input('coupon_code');
-        $cartSubtotal = $request->input('subtotal'); // Get subtotal from frontend for current calculation
+
+        // The subtotal is calculated from the server-side cart. Taking it from the
+        // request would let a crafted value produce any discount the caller wanted.
+        $cartSubtotal = $this->calculateCartSubtotal(Session::get('cart', []));
 
         if (!$couponCode) {
             return response()->json(['success' => false, 'message' => 'Coupon code is required.']);
@@ -231,8 +234,8 @@ class CartController extends Controller
         }
 
         // Calculate the discount amount
-        $discountPercentage = $couponRule->discount;
-        $discountAmount = ($cartSubtotal * $discountPercentage) / 100;
+        $discountPercentage = min(100, max(0, (float) $couponRule->discount));
+        $discountAmount = round($cartSubtotal * $discountPercentage / 100, 2);
 
         // Store coupon details in session
         session(['coupon_code' => $couponCode]);
