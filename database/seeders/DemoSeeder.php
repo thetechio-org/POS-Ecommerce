@@ -494,15 +494,15 @@ class DemoSeeder extends Seeder
         DB::table('discount_rules')->insert([
             [
                 'name' => 'Accessories Week', 'type' => 'category',
-                'target_ids' => json_encode([$this->ids['cat']['Chargers & Cables'], $this->ids['cat']['Cases & Covers']]),
+                'target_ids' => json_encode([$this->ids['cat']['Phone Accessories']]),
                 'discount' => 15, 'coupon_code' => null,
                 'start_date' => now()->subDays(5)->toDateString(),
                 'end_date' => now()->addDays(25)->toDateString(),
                 'created_at' => now(), 'updated_at' => now(),
             ],
             [
-                'name' => 'Wearables Promo', 'type' => 'category',
-                'target_ids' => json_encode([$this->ids['cat']['Fitness Trackers']]),
+                'name' => 'Audio Promo', 'type' => 'category',
+                'target_ids' => json_encode([$this->ids['cat']['Headphones & Speakers']]),
                 'discount' => 10, 'coupon_code' => null,
                 'start_date' => now()->subDays(2)->toDateString(),
                 'end_date' => now()->addDays(30)->toDateString(),
