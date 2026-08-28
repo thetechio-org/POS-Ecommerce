@@ -9,50 +9,36 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Give every demo product a picture.
+ * Give every demo product its own picture.
  *
- * Every product gets a drawn typographic card by default. Cards are consistent
- * and never wrong; the free sources of real product shots only cover a few
- * categories and are a generation or two out of date, so a phone photo ends up
- * under the wrong model name — which an audience of phone buyers will notice.
+ * DemoSeeder records, per product, the URL of the photograph its name came from,
+ * so what is downloaded here always matches what the listing says. Anything the
+ * seeder could not find a photograph for falls back to a drawn typographic card.
  *
- *     php artisan demo:images --force
- *     php artisan demo:images --force --photos   # opt back into real shots
+ *     php artisan demo:images
+ *     php artisan demo:images --force    # re-fetch products that already have one
  */
 class DemoImages extends Command
 {
-    protected $signature = 'demo:images {--force : Replace images that already exist}
-                            {--photos : Pull real product shots where a matching one exists}';
+    protected $signature = 'demo:images {--force : Replace images that already exist}';
 
     protected $description = 'Download or draw a product image for every demo product';
-
-    /** Our category name → the upstream category that has usable shots. */
-    private const SOURCES = [
-        'Smartphones'       => 'smartphones',
-        'Tablets'           => 'tablets',
-        'Laptops'           => 'laptops',
-        'Smartwatches'      => 'mens-watches',
-        'Fitness Trackers'  => 'mens-watches',
-        'Chargers & Cables' => 'mobile-accessories',
-        'Cases & Covers'    => 'mobile-accessories',
-        'Power Banks'       => 'mobile-accessories',
-    ];
 
     /** Accent colours for the drawn cards — one per category, on white. */
     private const ACCENTS = [
         '#0f5132', '#1d4e89', '#7d3c98', '#a8500f', '#0e7490', '#9d2f4f',
     ];
 
-    private array $pool = [];
+    /** product id → source image URL, written by DemoSeeder. */
+    private array $map = [];
 
     public function handle(): int
     {
         Storage::disk('public')->makeDirectory('products');
         Storage::disk('public')->makeDirectory('products/variants');
 
-        if ($this->option('photos')) {
-            $this->fetchPool();
-        }
+        $this->map = json_decode(Storage::disk('local')->get('demo-images.json') ?: '{}', true) ?: [];
+        $this->line('Source images recorded by the seeder: ' . count(array_filter($this->map)));
 
         $products = Product::with('category')->get();
         $bar = $this->output->createProgressBar($products->count());
@@ -69,12 +55,12 @@ class DemoImages extends Command
             }
 
             $path = "products/{$product->id}.webp";
-            $category = $product->category->name ?? '';
 
-            if ($this->option('photos') && $this->downloadFor($category, $path)) {
+            if ($this->download($this->map[$product->id] ?? null, $path)) {
                 $downloaded++;
             } else {
-                $this->drawCard($product->name, $product->brand ?? 'Sellora', $category, $path);
+                $this->drawCard($product->name, $product->brand ?? 'Sellora',
+                                $product->category->name ?? '', $path);
                 $drawn++;
             }
 
@@ -101,51 +87,17 @@ class DemoImages extends Command
         return self::SUCCESS;
     }
 
-    /**
-     * Collect real product-shot URLs, grouped by our category name.
-     * A failure here is not fatal — every product falls back to a drawn card.
-     */
-    private function fetchPool(): void
+    /** Fetch one product's own photograph. */
+    private function download(?string $url, string $path): bool
     {
-        foreach (array_unique(array_values(self::SOURCES)) as $slug) {
-            try {
-                $response = Http::timeout(20)->retry(2, 500)
-                    ->get("https://dummyjson.com/products/category/{$slug}", ['limit' => 50, 'select' => 'images']);
-
-                if (! $response->successful()) {
-                    continue;
-                }
-
-                foreach ($response->json('products', []) as $item) {
-                    foreach ($item['images'] ?? [] as $url) {
-                        $this->pool[$slug][] = $url;
-                    }
-                }
-            } catch (\Throwable $e) {
-                $this->warn("Could not reach the image source for {$slug}: {$e->getMessage()}");
-            }
-        }
-
-        $total = array_sum(array_map('count', $this->pool));
-        $this->line("Real product shots available: {$total}");
-    }
-
-    private function downloadFor(string $category, string $path): bool
-    {
-        $slug = self::SOURCES[$category] ?? null;
-
-        if (! $slug || empty($this->pool[$slug])) {
+        if (! $url) {
             return false;
         }
 
-        // Rotate through the pool so the same shot is not used twice in a row.
-        $url = array_shift($this->pool[$slug]);
-        $this->pool[$slug][] = $url;
-
         try {
-            $response = Http::timeout(20)->get($url);
+            $response = Http::timeout(25)->retry(2, 400)->get($url);
 
-            if (! $response->successful() || strlen($response->body()) < 1000) {
+            if (! $response->successful() || strlen($response->body()) < 800) {
                 return false;
             }
 

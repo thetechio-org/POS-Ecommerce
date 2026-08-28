@@ -5,7 +5,8 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Demo dataset — a Saudi electronics retailer.
@@ -202,13 +203,10 @@ class DemoSeeder extends Seeder
     private function catalogue(): void
     {
         $tree = [
-            'Mobile Phones'      => ['Smartphones', 'Tablets'],
-            'Computers'          => ['Laptops', 'Desktops', 'Monitors'],
-            'Audio'              => ['Headphones', 'Speakers'],
-            'Wearables'          => ['Smartwatches', 'Fitness Trackers'],
-            'Accessories'        => ['Chargers & Cables', 'Cases & Covers', 'Power Banks'],
-            'Home Entertainment' => ['Televisions', 'Gaming'],
-            'Cameras'            => ['Cameras', 'Drones'],
+            'Mobile'    => ['Smartphones', 'Phone Accessories'],
+            'Computing' => ['Laptops', 'Tablets'],
+            'Audio'     => ['Headphones & Speakers'],
+            'Watches'   => ['Luxury Watches', 'Smart Watches'],
         ];
 
         foreach ($tree as $parent => $children) {
@@ -255,8 +253,15 @@ class DemoSeeder extends Seeder
     // ── products ────────────────────────────────────────────────────────────
 
     /**
-     * Prices are realistic Saudi retail in SAR. Each entry is
-     * [name, brand, category, price, low-stock threshold, variant spec|null].
+     * Build the catalogue from a source that ships real product photography.
+     *
+     * The names come from the same place as the pictures, so a phone listing
+     * always shows that phone. Building the other way round — inventing a
+     * catalogue and then hunting for images — is what produces an iPhone 5
+     * photograph under an "iPhone 16 Pro Max" heading.
+     *
+     * Prices are the source's USD converted at the riyal's 3.75 peg, which lands
+     * them in the right place for Saudi retail.
      */
     private function products(): void
     {
@@ -265,171 +270,143 @@ class DemoSeeder extends Seeder
 
         DB::table('units')->where('id', $unit)->update(['conversion_factor' => 1]);
 
-        $catalogue = [
-            // Smartphones — the variant-heavy ones
-            ['iPhone 16 Pro Max',            'Apple',    'Smartphones', 6299, 5, ['colors' => ['Natural Titanium', 'Black Titanium', 'Desert Titanium'], 'sizes' => ['256GB', '512GB', '1TB'], 'step' => 700]],
-            ['iPhone 16 Pro',                'Apple',    'Smartphones', 5199, 5, ['colors' => ['Natural Titanium', 'Black Titanium'], 'sizes' => ['128GB', '256GB', '512GB'], 'step' => 600]],
-            ['iPhone 16',                    'Apple',    'Smartphones', 3899, 6, ['colors' => ['Ultramarine', 'Teal', 'Black'], 'sizes' => ['128GB', '256GB'], 'step' => 500]],
-            ['Samsung Galaxy S24 Ultra',     'Samsung',  'Smartphones', 5799, 5, ['colors' => ['Titanium Gray', 'Titanium Violet'], 'sizes' => ['256GB', '512GB'], 'step' => 650]],
-            ['Samsung Galaxy S24+',          'Samsung',  'Smartphones', 4299, 5, ['colors' => ['Onyx Black', 'Marble Gray'], 'sizes' => ['256GB', '512GB'], 'step' => 550]],
-            ['Samsung Galaxy Z Fold 6',      'Samsung',  'Smartphones', 7499, 3, null],
-            ['Samsung Galaxy A55',           'Samsung',  'Smartphones', 1499, 10, ['colors' => ['Awesome Navy', 'Awesome Lilac'], 'sizes' => ['128GB', '256GB'], 'step' => 250]],
-            ['Google Pixel 9 Pro',           'Google',   'Smartphones', 4599, 4, null],
-            ['Xiaomi 14 Ultra',              'Xiaomi',   'Smartphones', 3999, 5, null],
-            ['Xiaomi Redmi Note 13 Pro',     'Xiaomi',   'Smartphones',  999, 15, ['colors' => ['Midnight Black', 'Aurora Purple'], 'sizes' => ['128GB', '256GB'], 'step' => 200]],
-            ['Honor Magic 6 Pro',            'Honor',    'Smartphones', 3299, 5, null],
-            ['Nothing Phone (2a)',           'Nothing',  'Smartphones', 1199, 8, null],
-
-            // Tablets
-            ['iPad Pro 13" M4',              'Apple',    'Tablets',     5499, 4, ['colors' => ['Space Black', 'Silver'], 'sizes' => ['256GB', '512GB', '1TB'], 'step' => 900]],
-            ['iPad Air 11" M2',              'Apple',    'Tablets',     2899, 6, ['colors' => ['Blue', 'Starlight'], 'sizes' => ['128GB', '256GB'], 'step' => 500]],
-            ['iPad 10th Gen',                'Apple',    'Tablets',     1699, 8, null],
-            ['Samsung Galaxy Tab S9',        'Samsung',  'Tablets',     3299, 5, null],
-            ['Lenovo Tab P12',               'Lenovo',   'Tablets',     1099, 8, null],
-
-            // Laptops
-            ['MacBook Pro 16" M4 Pro',       'Apple',    'Laptops',    11999, 3, ['colors' => ['Space Black', 'Silver'], 'sizes' => ['512GB', '1TB'], 'step' => 1500]],
-            ['MacBook Pro 14" M4',           'Apple',    'Laptops',     8299, 3, null],
-            ['MacBook Air 15" M3',           'Apple',    'Laptops',     5799, 5, ['colors' => ['Midnight', 'Starlight', 'Space Gray'], 'sizes' => ['256GB', '512GB'], 'step' => 800]],
-            ['Dell XPS 15',                  'Dell',     'Laptops',     7499, 4, null],
-            ['Dell Inspiron 15',             'Dell',     'Laptops',     2299, 8, null],
-            ['HP Spectre x360 14',           'HP',       'Laptops',     6299, 4, null],
-            ['HP Pavilion 15',               'HP',       'Laptops',     2099, 10, null],
-            ['Lenovo ThinkPad X1 Carbon',    'Lenovo',   'Laptops',     7899, 3, null],
-            ['Lenovo IdeaPad Slim 5',        'Lenovo',   'Laptops',     2499, 8, null],
-            ['ASUS ROG Zephyrus G14',        'ASUS',     'Laptops',     6999, 4, null],
-            ['ASUS Vivobook 16',             'ASUS',     'Laptops',     2199, 9, null],
-            ['Microsoft Surface Laptop 7',   'Microsoft','Laptops',     4999, 4, null],
-
-            // Desktops & Monitors
-            ['iMac 24" M4',                  'Apple',    'Desktops',    5999, 3, null],
-            ['Mac mini M4',                  'Apple',    'Desktops',    2599, 5, null],
-            ['HP EliteDesk 800 G9',          'HP',       'Desktops',    3799, 4, null],
-            ['Dell OptiPlex 7010',           'Dell',     'Desktops',    2899, 5, null],
-            ['LG UltraFine 27" 4K',          'LG',       'Monitors',    2699, 5, null],
-            ['Samsung Odyssey G7 32"',       'Samsung',  'Monitors',    2399, 5, null],
-            ['Dell UltraSharp U2723QE',      'Dell',     'Monitors',    2199, 6, null],
-            ['BenQ PD2705U 27"',             'BenQ',     'Monitors',    1899, 6, null],
-
-            // Audio
-            ['AirPods Pro 2 (USB-C)',        'Apple',    'Headphones',   999, 20, null],
-            ['AirPods Max',                  'Apple',    'Headphones',  2299, 6, ['colors' => ['Midnight', 'Starlight', 'Blue'], 'sizes' => null, 'step' => 0]],
-            ['Sony WH-1000XM5',              'Sony',     'Headphones',  1599, 10, ['colors' => ['Black', 'Silver'], 'sizes' => null, 'step' => 0]],
-            ['Bose QuietComfort Ultra',      'Bose',     'Headphones',  1699, 8, null],
-            ['Samsung Galaxy Buds3 Pro',     'Samsung',  'Headphones',   799, 15, null],
-            ['JBL Tune 770NC',               'JBL',      'Headphones',   449, 20, null],
-            ['Sonos Era 300',                'Sonos',    'Speakers',    1899, 5, null],
-            ['JBL Charge 5',                 'JBL',      'Speakers',     649, 15, null],
-            ['Bose SoundLink Flex',          'Bose',     'Speakers',     599, 12, null],
-            ['Marshall Emberton III',        'Marshall', 'Speakers',     749, 10, null],
-
-            // Wearables
-            ['Apple Watch Ultra 2',          'Apple',    'Smartwatches', 3399, 5, null],
-            ['Apple Watch Series 10',        'Apple',    'Smartwatches', 1799, 10, ['colors' => ['Jet Black', 'Rose Gold', 'Silver'], 'sizes' => ['42mm', '46mm'], 'step' => 200]],
-            ['Samsung Galaxy Watch 7',       'Samsung',  'Smartwatches', 1299, 10, null],
-            ['Garmin Fenix 8',               'Garmin',   'Smartwatches', 4199, 3, null],
-            ['Huawei Watch GT 5 Pro',        'Huawei',   'Smartwatches', 1499, 8, null],
-            ['Fitbit Charge 6',              'Fitbit',   'Fitness Trackers', 599, 15, null],
-            ['Xiaomi Smart Band 9',          'Xiaomi',   'Fitness Trackers', 199, 30, null],
-            ['Whoop 4.0',                    'Whoop',    'Fitness Trackers', 999, 8, null],
-
-            // Accessories
-            ['Anker 140W GaN Charger',       'Anker',    'Chargers & Cables', 299, 30, null],
-            ['Apple 20W USB-C Adapter',      'Apple',    'Chargers & Cables',  89, 50, null],
-            ['Belkin BoostCharge 3-in-1',    'Belkin',   'Chargers & Cables', 449, 20, null],
-            ['USB-C to Lightning 2m',        'Apple',    'Chargers & Cables',  109, 60, null],
-            ['Spigen Ultra Hybrid Case',     'Spigen',   'Cases & Covers',      99, 80, ['colors' => ['Clear', 'Matte Black'], 'sizes' => null, 'step' => 0]],
-            ['OtterBox Defender Series',     'OtterBox', 'Cases & Covers',     229, 25, null],
-            ['Apple Silicone Case',          'Apple',    'Cases & Covers',     189, 35, null],
-            ['Anker 737 PowerCore 24K',      'Anker',    'Power Banks',        549, 15, null],
-            ['Anker MagGo 10K',              'Anker',    'Power Banks',        329, 25, null],
-            ['Xiaomi 20000mAh Power Bank',   'Xiaomi',   'Power Banks',        149, 40, null],
-
-            // Home entertainment
-            ['Samsung 65" Neo QLED QN90D',   'Samsung',  'Televisions',  8999, 3, null],
-            ['LG 55" OLED evo C4',           'LG',       'Televisions',  6499, 3, null],
-            ['Samsung 43" Crystal UHD',      'Samsung',  'Televisions',  1899, 6, null],
-            ['TCL 75" QLED C755',            'TCL',      'Televisions',  5299, 3, null],
-            ['PlayStation 5 Slim',           'Sony',     'Gaming',       2199, 8, null],
-            ['Xbox Series X',                'Microsoft','Gaming',       2099, 6, null],
-            ['Nintendo Switch OLED',         'Nintendo', 'Gaming',       1499, 10, null],
-            ['DualSense Edge Controller',    'Sony',     'Gaming',        899, 12, null],
-
-            // Cameras
-            ['Sony Alpha A7 IV',             'Sony',     'Cameras',      9999, 2, null],
-            ['Canon EOS R6 Mark II',         'Canon',    'Cameras',      9499, 2, null],
-            ['GoPro HERO13 Black',           'GoPro',    'Cameras',      1899, 8, null],
-            ['DJI Osmo Pocket 3',            'DJI',      'Cameras',      1749, 8, null],
-            ['DJI Mini 4 Pro',               'DJI',      'Drones',       3299, 4, null],
-            ['DJI Air 3S',                   'DJI',      'Drones',       4999, 3, null],
-        ];
-
+        $imageMap = [];
         $n = 1;
-        foreach ($catalogue as [$name, $brand, $category, $price, $lowStock, $variantSpec]) {
+
+        foreach ($this->fetchCatalogue() as $item) {
             $sku = 'SEL-' . str_pad((string) $n, 4, '0', STR_PAD_LEFT);
+            $price = (float) round($item['usd'] * 3.75);
+            $lowStock = $price > 3000 ? 3 : ($price > 800 ? 6 : 15);
 
             $productId = DB::table('products')->insertGetId([
-                'name' => $name,
-                'category_id' => $this->ids['cat'][$category],
+                'name' => $item['name'],
+                'category_id' => $this->ids['cat'][$item['category']],
                 'base_unit_id' => $unit,
                 'default_display_unit_id' => $unit,
-                'has_variants' => $variantSpec !== null,
+                'has_variants' => false,
                 'sku' => $sku,
                 'barcode' => '628' . str_pad((string) (100000 + $n * 7), 10, '0', STR_PAD_LEFT),
-                'brand' => $brand,
+                'brand' => $item['brand'],
                 'track_expiry' => false,
                 'tax_rate' => self::VAT,
                 'actual_price' => $price,
                 'low_stock' => $lowStock,
-                'created_at' => now()->subMonths(rand(3, 10)),
+                'created_at' => now()->subDays(rand(20, 300)),
                 'updated_at' => now(),
             ]);
 
-            $this->ids['product'][] = ['id' => $productId, 'price' => $price, 'name' => $name];
+            $this->ids['product'][] = ['id' => $productId, 'price' => $price, 'name' => $item['name']];
+            $imageMap[$productId] = $item['image'];
 
-            // A supplier or two per product
             foreach ((array) array_rand(array_flip($this->ids['supplier']), 2) as $supplierId) {
                 DB::table('product_supplier')->insert([
                     'product_id' => $productId, 'supplier_id' => $supplierId,
                 ]);
             }
 
-            if ($variantSpec) {
-                $this->variantsFor($productId, $sku, $price, $variantSpec, $lowStock);
-            }
-
             $n++;
         }
+
+        // demo:images reads this to fetch each product's own picture.
+        Storage::disk('local')->put('demo-images.json', json_encode($imageMap));
+
+        $this->command->line('  catalogue built from ' . count($imageMap) . ' photographed products');
     }
 
-    private function variantsFor(int $productId, string $sku, float $base, array $spec, int $lowStock): void
+    /**
+     * Pull the photographed catalogue, falling back to a small built-in list so
+     * seeding still works on a machine with no outbound network.
+     *
+     * @return array<int, array{name:string,brand:string,category:string,usd:float,image:?string}>
+     */
+    private function fetchCatalogue(): array
     {
-        $colors = $spec['colors'] ?? [null];
-        $sizes  = $spec['sizes']  ?? [null];
-        $step   = $spec['step']   ?? 0;
-        $v = 1;
+        $sources = [
+            'smartphones'        => 'Smartphones',
+            'laptops'            => 'Laptops',
+            'tablets'            => 'Tablets',
+            'mobile-accessories' => null,          // split by what the item is
+            'mens-watches'       => 'Luxury Watches',
+            'womens-watches'     => 'Luxury Watches',
+        ];
 
-        foreach ($colors as $color) {
-            foreach ($sizes as $i => $size) {
-                $price = $base + ($step * ($size === null ? 0 : $i));
-                $label = trim(($color ?? '') . ($color && $size ? ' / ' : '') . ($size ?? ''));
+        $audio = ['airpods', 'beats', 'homepod', 'echo', 'headphone', 'earphone', 'speaker'];
+        $smartWatch = ['apple watch', 'smart watch'];
+        $catalogue = [];
 
-                $variantId = DB::table('product_variants')->insertGetId([
-                    'product_id' => $productId,
-                    'color' => $color,
-                    'size' => $size,
-                    'variant_name' => $label,
-                    'sku' => $sku . '-V' . $v,
-                    'barcode' => '629' . str_pad((string) ($productId * 100 + $v), 10, '0', STR_PAD_LEFT),
-                    'actual_price' => $price,
-                    'low_stock' => $lowStock,
-                    'created_at' => now(), 'updated_at' => now(),
-                ]);
+        foreach ($sources as $slug => $category) {
+            try {
+                $response = Http::timeout(25)->retry(2, 500)->get(
+                    "https://dummyjson.com/products/category/{$slug}",
+                    ['limit' => 50, 'select' => 'title,price,brand,images']
+                );
 
-                $this->ids['variant'][] = ['id' => $variantId, 'product_id' => $productId, 'price' => $price];
-                $v++;
+                if (! $response->successful()) {
+                    continue;
+                }
+
+                foreach ($response->json('products', []) as $item) {
+                    $title = $item['title'] ?? null;
+
+                    if (! $title) {
+                        continue;
+                    }
+
+                    $resolved = $category;
+
+                    if ($resolved === null) {
+                        $lower = mb_strtolower($title);
+                        $resolved = 'Phone Accessories';
+
+                        foreach ($audio as $needle) {
+                            if (str_contains($lower, $needle)) {
+                                $resolved = 'Headphones & Speakers';
+                                break;
+                            }
+                        }
+                        foreach ($smartWatch as $needle) {
+                            if (str_contains($lower, $needle)) {
+                                $resolved = 'Smart Watches';
+                                break;
+                            }
+                        }
+                    }
+
+                    $catalogue[] = [
+                        'name' => $title,
+                        'brand' => $item['brand'] ?? explode(' ', $title)[0],
+                        'category' => $resolved,
+                        'usd' => (float) ($item['price'] ?? 99),
+                        'image' => $item['images'][0] ?? null,
+                    ];
+                }
+            } catch (\Throwable $e) {
+                $this->command->warn("Could not reach the catalogue source for {$slug}.");
             }
         }
+
+        return $catalogue ?: $this->fallbackCatalogue();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function fallbackCatalogue(): array
+    {
+        $items = [
+            ['iPhone 13 Pro', 'Apple', 'Smartphones', 1099.99],
+            ['iPhone X', 'Apple', 'Smartphones', 899.99],
+            ['Samsung Galaxy S10', 'Samsung', 'Smartphones', 699.99],
+            ['Oppo F19 Pro Plus', 'Oppo', 'Smartphones', 399.99],
+            ['Apple MacBook Pro 14 Inch', 'Apple', 'Laptops', 1999.99],
+            ['DELL XPS 13 9300', 'Dell', 'Laptops', 1499.99],
+            ['iPad Mini 2021', 'Apple', 'Tablets', 499.99],
+            ['Apple AirPods Max', 'Apple', 'Headphones & Speakers', 549.99],
+            ['Apple iPhone Charger', 'Apple', 'Phone Accessories', 19.99],
+            ['Rolex Datejust', 'Rolex', 'Luxury Watches', 10999.99],
+        ];
+
+        return array_map(fn ($i) => [
+            'name' => $i[0], 'brand' => $i[1], 'category' => $i[2], 'usd' => $i[3], 'image' => null,
+        ], $items);
     }
 
     // ── stock ───────────────────────────────────────────────────────────────
